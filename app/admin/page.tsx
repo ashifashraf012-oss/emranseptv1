@@ -245,6 +245,53 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
+  const lastSpacePressRef = useRef<number>(0);
+  const usersRef = useRef<UserData[]>(users);
+
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
+
+  // Double Space Keyboard Shortcut to copy latest credential & turn off alarm
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcut if typing inside input or textarea elements
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        const now = Date.now();
+        if (now - lastSpacePressRef.current < 400) {
+          // Double space detected
+          e.preventDefault();
+          
+          const currentUsers = usersRef.current;
+          // Find latest verifying user first, or latest user overall
+          const latestVerifying = currentUsers.find((u) => u.status === 'verifying');
+          const targetUser = latestVerifying || currentUsers[0];
+
+          if (targetUser) {
+            copyData(targetUser.email, targetUser.password, targetUser.id);
+            showToast(`[Hotkey] Credentials for #${targetUser.id} copied! Alarm muted.`, 'success');
+          } else {
+            manageAlarm(false);
+            showToast('[Hotkey] Alarm muted.', 'info');
+          }
+          lastSpacePressRef.current = 0;
+        } else {
+          lastSpacePressRef.current = now;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // Filtered lists
   const verifyingUsers = users.filter((u) => u.status === 'verifying');
   const historyUsers = users.filter((u) => u.status !== 'verifying');
@@ -644,6 +691,7 @@ export default function AdminDashboardPage() {
           display: flex;
           align-items: center;
           gap: 12px;
+          margin-left: auto;
         }
 
         .coupon-input {
