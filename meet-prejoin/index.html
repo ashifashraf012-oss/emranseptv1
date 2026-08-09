@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#202124">
+<title>tap-bnhq-jhw</title>
+<style>
+/* --------------------------------------------------------------------------
+   Palette sampled from the reference screenshot.
+   -------------------------------------------------------------------------- */
+:root {
+  --bg: #202124;
+  --card: #000;
+  --sheet: #3a3c3f;
+  --chip: #3c4043;
+  --purple: #9232be;
+  --blue: #1a6ef5;
+  --badge: #3c4a5c;
+  --badge-ink: #d3e3fd;
+  --err-container: #f9dedc;
+  --err-ink: #601410;
+  --text: #e8eaed;
+  --text-dim: #bdc1c6;
+
+  --phone: 420px;
+  --font: "Google Sans", "Google Sans Text", "Product Sans", Roboto,
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0d0e10;
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+/* The phone-sized column. Fills the viewport on a real phone, centres on a
+   desktop so the layout is never stretched wider than it was designed for. */
+.phone {
+  position: relative;
+  width: min(100vw, var(--phone));
+  height: 100dvh;
+  max-height: 100dvh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 460px) and (min-height: 700px) {
+  .phone {
+    height: min(92dvh, 880px);
+    border-radius: 28px;
+    box-shadow: 0 24px 70px rgb(0 0 0 / 0.6);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Top bar
+   -------------------------------------------------------------------------- */
+.topbar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 10px 10px;
+  padding-top: max(14px, env(safe-area-inset-top));
+}
+
+.icon-btn {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .15s ease;
+}
+.icon-btn:hover { background: rgb(255 255 255 / 0.08); }
+.icon-btn:active { background: rgb(255 255 255 / 0.14); }
+.icon-btn svg { width: 26px; height: 26px; fill: currentColor; }
+
+.meeting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 999px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.meeting:hover { background: rgb(255 255 255 / 0.06); }
+
+.badge {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--badge);
+  color: var(--badge-ink);
+  display: grid;
+  place-items: center;
+}
+.badge svg { width: 20px; height: 20px; fill: currentColor; }
+
+.code {
+  margin: 0;
+  font-size: clamp(19px, 6.2vw, 26px);
+  font-weight: 400;
+  letter-spacing: .1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------------------
+   Self-view card
+   -------------------------------------------------------------------------- */
+main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 3.4vh, 26px);
+  padding: 4px 0 12px;
+}
+
+.preview {
+  position: relative;
+  width: 62%;
+  max-width: 264px;
+  min-height: 0;
+  aspect-ratio: 9 / 16.2;
+  max-height: 100%;
+  background: var(--card);
+  border-radius: 28px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 5.3%;
+  gap: 5.3%;
+}
+
+.preview video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* self-view is mirrored, as in the original */
+  opacity: 0;
+  transition: opacity .25s ease;
+}
+.preview.camera-on video { opacity: 1; }
+
+.avatar {
+  position: absolute;
+  top: 37%;
+  left: 50%;
+  translate: -50% -50%;
+  width: 77%;
+  aspect-ratio: 1;
+  /* The initial's line box is taller than the circle; without these the grid
+     would stretch and the circle would go slightly oval. */
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--purple);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  container-type: inline-size;
+  transition: opacity .2s ease, scale .2s ease;
+}
+/* Sized against the circle itself, so the glyph keeps the reference's
+   proportions at any phone width. */
+.avatar span {
+  font-size: 102cqw;
+  line-height: 1;
+  font-weight: 400;
+  translate: 0 1%;
+}
+/* Shown instead of an initial while the name is still unknown. */
+.avatar svg {
+  width: 62%;
+  height: 62%;
+  fill: #fff;
+}
+.avatar [hidden] { display: none; }
+.preview.camera-on .avatar { opacity: 0; scale: .9; }
+
+.controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8%;
+  z-index: 1;
+}
+
+.ctl {
+  --level: 0;
+  flex: 0 0 auto;
+  width: clamp(44px, 11.8vw, 52px);
+  height: clamp(44px, 11.8vw, 52px);
+  border: 0;
+  border-radius: 50%;
+  background: var(--chip);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .18s ease, border-radius .18s ease, color .18s ease;
+}
+.ctl svg { width: 55%; height: 55%; fill: currentColor; }
+.ctl:hover { filter: brightness(1.12); }
+.ctl:active { scale: .94; }
+
+/* "Off" is the filled error-container squircle the original uses. */
+.ctl[aria-pressed="false"] {
+  background: var(--err-container);
+  color: var(--err-ink);
+  border-radius: 28%;
+}
+
+/* Live input level, so the microphone is visibly doing something. */
+#mic[aria-pressed="true"] {
+  box-shadow: 0 0 0 calc(var(--level) * 9px) rgb(138 180 248 / 0.28);
+}
+
+/* --------------------------------------------------------------------------
+   Name — carried by the joining link
+   -------------------------------------------------------------------------- */
+/* Fixed height whether or not a name is known, so the control row keeps the
+   reference's proportions either way. */
+.identity {
+  position: relative;
+  z-index: 1;
+  width: 86%;
+  height: clamp(26px, 6.9vw, 31px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.identity [hidden] { display: none; }
+
+.name {
+  margin: 0;
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: clamp(14px, 4.6vw, 19px);
+  font-weight: 500;
+  color: #fff;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+
+/* --------------------------------------------------------------------------
+   Bottom sheet
+   -------------------------------------------------------------------------- */
+.sheet {
+  flex: 0 0 auto;
+  background: var(--sheet);
+  border-radius: 28px 28px 0 0;
+  padding: 14px 0 max(30px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  touch-action: none;
+  will-change: transform;
+}
+
+.handle {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: #cfd2d5;
+  margin-bottom: 22px;
+  cursor: grab;
+}
+.sheet.dragging .handle { cursor: grabbing; }
+
+.join {
+  width: 79%;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-size: clamp(18px, 5.9vw, 23px);
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .15s ease, scale .12s ease;
+}
+.join svg { width: 28px; height: 28px; fill: currentColor; flex: 0 0 auto; }
+.join:hover { background: #3a83f7; }
+.join:active { scale: .985; }
+
+.join[data-state="asking"] { background: #2f3134; }
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2.5px solid rgb(255 255 255 / 0.28);
+  border-top-color: #fff;
+  animation: spin .9s linear infinite;
+}
+@keyframes spin { to { rotate: 360deg; } }
+
+.companion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 999px;
+  background: #17181a;
+  color: var(--text);
+  font: inherit;
+  font-size: clamp(13px, 3.8vw, 15px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .15s ease;
+}
+.companion svg { width: 20px; height: 20px; fill: currentColor; }
+.companion:hover { background: #26282b; }
+.companion[aria-pressed="true"] { background: #d3e3fd; color: #041e49; }
+
+/* --------------------------------------------------------------------------
+   Overflow menu + toast
+   -------------------------------------------------------------------------- */
+.menu {
+  position: absolute;
+  top: 62px;
+  right: 12px;
+  min-width: 190px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: #2d2f31;
+  box-shadow: 0 8px 26px rgb(0 0 0 / 0.55);
+  z-index: 20;
+  transform-origin: top right;
+  animation: pop .13s ease-out;
+}
+@keyframes pop { from { scale: .94; opacity: 0; } }
+.menu[hidden] { display: none; }
+
+.menu button {
+  display: block;
+  width: 100%;
+  padding: 12px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu button:hover { background: rgb(255 255 255 / 0.08); }
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  translate: -50% 20px;
+  max-width: 84%;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background: #e8eaed;
+  color: #202124;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease, translate .2s ease;
+  z-index: 30;
+}
+.toast.show {
+  opacity: 1;
+  translate: -50% -22px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    transition-duration: .001ms !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="phone">
+
+  <header class="topbar">
+    <button class="icon-btn" id="back" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    </button>
+
+    <button class="meeting" id="copy-link" type="button" title="Copy joining link">
+      <span class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
+      </span>
+      <h1 class="code">tap-bnhq-jhw</h1>
+    </button>
+
+    <button class="icon-btn" id="menu-btn" type="button" aria-label="More options" aria-haspopup="menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <div class="preview" id="preview">
+      <video id="video" playsinline autoplay muted></video>
+
+      <div class="avatar" aria-hidden="true">
+        <span id="avatar-letter"></span>
+        <svg id="avatar-icon" viewBox="0 0 24 24" hidden><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      </div>
+
+      <div class="controls">
+        <button class="ctl" id="cam" type="button" aria-pressed="false" aria-label="Turn on camera">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cam"/></svg>
+        </button>
+        <button class="ctl" id="mic" type="button" aria-pressed="false" aria-label="Turn off microphone">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mic"/></svg>
+        </button>
+      </div>
+
+      <div class="identity">
+        <p class="name" id="name" hidden></p>
+      </div>
+    </div>
+  </main>
+
+  <section class="sheet" id="sheet">
+    <div class="handle" id="handle" role="separator" aria-label="Drag handle"></div>
+
+    <button class="join" id="join" type="button" data-state="idle">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+      <span>Ask to join</span>
+    </button>
+
+    <button class="companion" id="companion" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H9V5h12v14z"/></svg>
+      <span>Use Companion Mode</span>
+    </button>
+  </section>
+
+  <div class="menu" id="menu" role="menu" hidden>
+    <button type="button" role="menuitem" data-label="Settings">Settings</button>
+    <button type="button" role="menuitem" data-label="Send feedback">Send feedback</button>
+    <button type="button" role="menuitem" data-label="Help">Help</button>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<!-- Icon sprite. Swapped by <use href> when a device is toggled. -->
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></symbol>
+  <symbol id="i-cam-off" viewBox="0 0 24 24"><path d="M21 6.5l-4 4V7c0-.55-.45-1-1-1H9.82L21 17.18V6.5zM3.27 2 2 3.27 4.73 6H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></symbol>
+  <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3 3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></symbol>
+</svg>
+
+<script>
+/* ===========================================================================
+   Nothing here talks to a network. There is no fetch, no WebSocket, no
+   RTCPeerConnection. The camera and microphone streams are attached to a local
+   <video> element and an AnalyserNode and are stopped when toggled off — they
+   never leave the page.
+   =========================================================================== */
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+
+const preview  = $("preview");
+const video    = $("video");
+const camBtn   = $("cam");
+const micBtn   = $("mic");
+const joinBtn  = $("join");
+const menu     = $("menu");
+const menuBtn  = $("menu-btn");
+const sheet    = $("sheet");
+const toastEl  = $("toast");
+
+const nameText     = $("name");
+const avatarLetter = $("avatar-letter");
+const avatarIcon   = $("avatar-icon");
+
+const MEETING_CODE = "tap-bnhq-jhw";
+const NAME_KEY = "meet-prejoin:name";
+
+let camStream = null;
+let micStream = null;
+let audioCtx = null;
+let analyser = null;
+let levelFrame = 0;
+
+/* ---------- toast ------------------------------------------------------- */
+let toastTimer = 0;
+function toast(message) {
+  toastEl.textContent = message;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
+}
+
+/* ---------- device errors ----------------------------------------------- */
+function describe(error, device) {
+  switch (error?.name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return `${device} blocked. Allow it from the icon in the address bar.`;
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return `No ${device.toLowerCase()} found on this device.`;
+    case "NotReadableError":
+      return `${device} is already in use by another app.`;
+    default:
+      return `${device} unavailable: ${error?.name ?? "unknown error"}`;
+  }
+}
+
+function assertMediaSupport() {
+  if (navigator.mediaDevices?.getUserMedia) return true;
+  toast("This browser needs a secure origin — open the page over http://localhost or https.");
+  return false;
+}
+
+/* ---------- camera ------------------------------------------------------ */
+function paintCam(on) {
+  camBtn.setAttribute("aria-pressed", String(on));
+  camBtn.setAttribute("aria-label", on ? "Turn off camera" : "Turn on camera");
+  camBtn.querySelector("use").setAttribute("href", on ? "#i-cam" : "#i-cam-off");
+  preview.classList.toggle("camera-on", on);
+}
+
+async function setCamera(on) {
+  if (on) {
+    if (!assertMediaSupport()) return;
+    try {
+      // "user" is a preference, not `exact` — a laptop with one camera would
+      // throw OverconstrainedError otherwise. On a phone it picks the front one.
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      video.srcObject = camStream;
+      await video.play().catch(() => {});
+
+      // Fade in only once there is a real frame, so the card never flashes black.
+      if (video.readyState < 2) {
+        await new Promise((resolve) => {
+          const done = () => { clearTimeout(timer); resolve(); };
+          const timer = setTimeout(done, 1500); // never hang on a quiet camera
+          video.addEventListener("loadeddata", done, { once: true });
+        });
+      }
+      paintCam(true);
+    } catch (error) {
+      camStream = null;
+      paintCam(false);
+      toast(describe(error, "Camera"));
+    }
+    return;
+  }
+
+  camStream?.getTracks().forEach((t) => t.stop());
+  camStream = null;
+  video.srcObject = null;
+  paintCam(false);
+}
+
+/* ---------- microphone -------------------------------------------------- */
+function paintMic(on) {
+  micBtn.setAttribute("aria-pressed", String(on));
+  micBtn.setAttribute("aria-label", on ? "Turn off microphone" : "Turn on microphone");
+  micBtn.querySelector("use").setAttribute("href", on ? "#i-mic" : "#i-mic-off");
+  if (!on) micBtn.style.setProperty("--level", "0");
+}
+
+function startLevelMeter(stream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+
+  audioCtx = new Ctx();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+
+  // The microphone is requested on load, before any user gesture, so the
+  // context starts suspended and the meter would read a flat zero. Resume it
+  // now if allowed, and again on the first interaction if not.
+  const resume = () => audioCtx?.resume().catch(() => {});
+  resume();
+  addEventListener("pointerdown", resume, { once: true });
+  addEventListener("keydown", resume, { once: true });
+
+  const samples = new Uint8Array(analyser.fftSize);
+  let smoothed = 0;
+
+  const tick = () => {
+    analyser.getByteTimeDomainData(samples);
+    let sum = 0;
+    for (const s of samples) {
+      const v = (s - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / samples.length);
+    smoothed += (Math.min(1, rms * 6) - smoothed) * 0.25;
+    micBtn.style.setProperty("--level", smoothed.toFixed(3));
+    levelFrame = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function stopLevelMeter() {
+  cancelAnimationFrame(levelFrame);
+  levelFrame = 0;
+  analyser = null;
+  audioCtx?.close().catch(() => {});
+  audioCtx = null;
+}
+
+async function setMic(on) {
+  if (on) {
+    if (!assertMediaSupport()) return;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      startLevelMeter(micStream);
+      paintMic(true);
+    } catch (error) {
+      micStream = null;
+      paintMic(false);
+      toast(describe(error, "Microphone"));
+    }
+    return;
+  }
+
+  stopLevelMeter();
+  micStream?.getTracks().forEach((t) => t.stop());
+  micStream = null;
+  paintMic(false);
+}
+
+function releaseAll() {
+  setCamera(false);
+  setMic(false);
+}
+
+/* ---------- controls ---------------------------------------------------- */
+camBtn.addEventListener("click", () => setCamera(camBtn.getAttribute("aria-pressed") !== "true"));
+micBtn.addEventListener("click", () => setMic(micBtn.getAttribute("aria-pressed") !== "true"));
+
+/* ---------- who is joining -----------------------------------------------
+   The name arrives with the joining link — .../?name=Rahul%20Ahmed — and is
+   remembered on this device, so the next visit already knows who you are.
+   Until one is known the tile shows the generic person icon and no label.
+   ------------------------------------------------------------------------- */
+let joinerName = "";
+
+// Collapse whitespace, drop control characters, and cap the length. The name is
+// only ever written through textContent, so this never reaches innerHTML.
+function cleanName(value) {
+  return String(value ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+}
+
+function initialOf(value) {
+  // Take the first letter-or-digit, so "  ~rahul" still gives "R".
+  const match = value.match(/[\p{L}\p{N}]/u);
+  return match ? match[0].toLocaleUpperCase() : "";
+}
+
+function readStoredName() {
+  try {
+    return cleanName(localStorage.getItem(NAME_KEY));
+  } catch {
+    return ""; // private mode, or storage disabled
+  }
+}
+
+function storeName(value) {
+  try {
+    if (value) localStorage.setItem(NAME_KEY, value);
+    else localStorage.removeItem(NAME_KEY);
+  } catch {
+    /* not being able to remember the name is not worth interrupting anyone */
+  }
+}
+
+function renderName() {
+  const known = Boolean(joinerName);
+
+  nameText.textContent = joinerName;
+  nameText.hidden = !known;
+
+  avatarLetter.textContent = known ? initialOf(joinerName) : "";
+  avatarLetter.hidden = !known;
+  // `hidden` is an HTMLElement property; on an SVG element it is a plain
+  // expando and the attribute never changes. Set the attribute directly.
+  avatarIcon.toggleAttribute("hidden", known);
+
+  document.title = known ? `${joinerName} — ${MEETING_CODE}` : MEETING_CODE;
+}
+
+function setName(value, { remember = true } = {}) {
+  joinerName = cleanName(value);
+  if (remember) storeName(joinerName);
+  renderName();
+}
+
+function nameFromLink() {
+  const params = new URLSearchParams(location.search);
+  // Accept the name from the hash too, so it never reaches a server log.
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+  return cleanName(params.get("name") ?? hash.get("name"));
+}
+
+// A name carried by the link wins, and is remembered for next time.
+const linkName = nameFromLink();
+setName(linkName || readStoredName(), { remember: Boolean(linkName) });
+
+// Opening a second invite in the same tab only changes the hash, which is a
+// same-document navigation — nothing would re-run without this.
+addEventListener("hashchange", () => {
+  const next = nameFromLink();
+  if (next && next !== joinerName) setName(next);
+});
+
+/* ---------- join -------------------------------------------------------- */
+const joinIcon = joinBtn.querySelector("svg");
+const joinText = joinBtn.querySelector("span");
+
+joinBtn.addEventListener("click", () => {
+  if (joinBtn.dataset.state === "idle") {
+    joinBtn.dataset.state = "asking";
+    joinIcon.replaceWith(Object.assign(document.createElement("div"), { className: "spinner" }));
+    joinText.textContent = "Asking to join…";
+    toast("Waiting for someone to let you in");
+  } else {
+    joinBtn.dataset.state = "idle";
+    joinBtn.querySelector(".spinner").replaceWith(joinIcon);
+    joinText.textContent = "Ask to join";
+    toast("Request cancelled");
+  }
+});
+
+/* ---------- copy link --------------------------------------------------- */
+$("copy-link").addEventListener("click", async () => {
+  const link = `https://meet.google.com/${MEETING_CODE}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast("Joining info copied");
+  } catch {
+    const field = document.createElement("textarea");
+    field.value = link;
+    field.style.cssText = "position:fixed;opacity:0";
+    document.body.append(field);
+    field.select();
+    const ok = document.execCommand?.("copy");
+    field.remove();
+    toast(ok ? "Joining info copied" : "Could not copy the link");
+  }
+});
+
+/* ---------- overflow menu ----------------------------------------------- */
+function setMenu(open) {
+  menu.hidden = !open;
+  menuBtn.setAttribute("aria-expanded", String(open));
+}
+
+menuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setMenu(menu.hidden);
+});
+
+menu.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-label]");
+  if (!item) return;
+  setMenu(false);
+  toast(`${item.dataset.label} — not wired up in this mock-up`);
+});
+
+document.addEventListener("click", () => setMenu(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setMenu(false);
+});
+
+/* ---------- misc buttons ------------------------------------------------ */
+$("companion").addEventListener("click", (event) => {
+  const on = event.currentTarget.getAttribute("aria-pressed") !== "true";
+  event.currentTarget.setAttribute("aria-pressed", String(on));
+  toast(on ? "Companion Mode on — mic and camera stay off" : "Companion Mode off");
+  if (on) releaseAll();
+});
+
+$("back").addEventListener("click", () => {
+  releaseAll();
+  if (history.length > 1) history.back();
+  else toast("Camera and microphone released");
+});
+
+/* ---------- draggable sheet --------------------------------------------- */
+(() => {
+  const handle = $("handle");
+  let startY = 0;
+  let offset = 0;
+
+  const move = (event) => {
+    offset = Math.max(0, Math.min(60, event.clientY - startY));
+    sheet.style.transform = `translateY(${offset}px)`;
+  };
+
+  const end = (event) => {
+    sheet.releasePointerCapture(event.pointerId);
+    sheet.classList.remove("dragging");
+    sheet.style.transition = "transform .22s ease";
+    sheet.style.transform = "";
+    setTimeout(() => { sheet.style.transition = ""; }, 240);
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", end);
+    handle.removeEventListener("pointercancel", end);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    startY = event.clientY;
+    sheet.classList.add("dragging");
+    sheet.setPointerCapture(event.pointerId);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  });
+})();
+
+/* ---------- release devices when the page goes away --------------------- */
+window.addEventListener("pagehide", releaseAll);
+
+/* ---------- initial state ------------------------------------------------
+   The reference screenshot shows the camera off and the microphone on, so the
+   page asks for the microphone once on load. A refusal just leaves it muted.
+   ------------------------------------------------------------------------- */
+paintCam(false);
+paintMic(false);
+setMic(true);
+</script>
+</body>
+</html>
