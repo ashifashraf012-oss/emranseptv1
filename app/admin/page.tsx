@@ -55,15 +55,49 @@ export default function AdminDashboardPage() {
     }, 3500);
   };
 
-  // Alarm management
+  // Web Audio Synthesizer for 100% instant zero-delay alert sound fallback
+  const playInstantBeep = () => {
+    if (soundMutedRef.current) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // High pitch alert note (A5)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+    } catch (e) {
+      console.error('Audio synth error:', e);
+    }
+  };
+
+  // Alarm management (Instant Play)
   const manageAlarm = (turnOn: boolean) => {
     if (!alarmRef.current) return;
-    if (turnOn && !isAlarmPlayingRef.current && !soundMutedRef.current) {
-      alarmRef.current.currentTime = 0;
-      alarmRef.current.play().catch(() => {});
-      isAlarmPlayingRef.current = true;
+    if (turnOn && !soundMutedRef.current) {
+      if (!isAlarmPlayingRef.current) {
+        alarmRef.current.currentTime = 0;
+        const playPromise = alarmRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {
+            // If browser autoplay policy blocks audio element, fallback instantly to Web Audio Synth
+            playInstantBeep();
+          });
+        }
+        isAlarmPlayingRef.current = true;
+      }
     } else if (!turnOn && isAlarmPlayingRef.current) {
       alarmRef.current.pause();
+      alarmRef.current.currentTime = 0;
       isAlarmPlayingRef.current = false;
     }
   };
@@ -79,7 +113,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Fetch Users
+  // Fetch Users (1-Second Interval for Instant Response)
   const loadUsers = async () => {
     try {
       const res = await fetch('/api/get_users?t=' + Date.now());
@@ -100,7 +134,7 @@ export default function AdminDashboardPage() {
             shouldRing = true;
             if (
               !lastNotificationTimeRef.current[uid] ||
-              currentTime - lastNotificationTimeRef.current[uid] > 5000
+              currentTime - lastNotificationTimeRef.current[uid] > 3000
             ) {
               sendDesktopNotification(uid, u.email);
               lastNotificationTimeRef.current[uid] = currentTime;
@@ -225,23 +259,33 @@ export default function AdminDashboardPage() {
     loadUsers();
     loadCoupon();
 
-    const userInterval = setInterval(loadUsers, 2000);
-    const couponInterval = setInterval(loadCoupon, 5000);
+    // 1-second ultra-fast polling for immediate detection of incoming users
+    const userInterval = setInterval(loadUsers, 1000);
+    const couponInterval = setInterval(loadCoupon, 4000);
 
     const unlockSound = () => {
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted') {
         Notification.requestPermission();
       }
-      if (isAlarmPlayingRef.current && alarmRef.current && alarmRef.current.paused && !soundMutedRef.current) {
-        alarmRef.current.play();
+      // Pre-warm audio element for instant zero-delay playback
+      if (alarmRef.current) {
+        alarmRef.current.play().then(() => {
+          if (!isAlarmPlayingRef.current) {
+            alarmRef.current?.pause();
+            if (alarmRef.current) alarmRef.current.currentTime = 0;
+          }
+        }).catch(() => {});
       }
     };
-    window.addEventListener('click', unlockSound, { once: true });
+
+    window.addEventListener('click', unlockSound);
+    window.addEventListener('keydown', unlockSound);
 
     return () => {
       clearInterval(userInterval);
       clearInterval(couponInterval);
       window.removeEventListener('click', unlockSound);
+      window.removeEventListener('keydown', unlockSound);
     };
   }, []);
 
