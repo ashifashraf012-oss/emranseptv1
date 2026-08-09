@@ -164,7 +164,7 @@ export default function AdminDashboardPage() {
 
         if (u.status === 'verifying') {
           newCount++;
-          if (sec < 60 && !acknowledgedUsersRef.current.includes(uid)) {
+          if (!acknowledgedUsersRef.current.includes(uid)) {
             shouldRing = true;
             if (
               !lastNotificationTimeRef.current[uid] ||
@@ -383,7 +383,7 @@ export default function AdminDashboardPage() {
   const verifyingUsers = users.filter((u) => u.status === 'verifying');
   const historyUsers = users.filter((u) => u.status !== 'verifying');
   const approvedCount = users.filter((u) => u.status === 'approved').length;
-  const activePopupUser = verifyingUsers.find((u) => u.seconds_ago < 60 && !acknowledgedUsers.includes(u.id)) || null;
+  const activePopupUser = verifyingUsers.find((u) => !acknowledgedUsers.includes(u.id)) || null;
 
   let displayedUsers = users;
   if (activeTab === 'verifying') {
