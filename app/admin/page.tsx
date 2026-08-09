@@ -60,49 +60,78 @@ export default function AdminDashboardPage() {
     }, 3500);
   };
 
-  // Web Audio Synthesizer for 100% instant zero-delay alert sound fallback
-  const playInstantBeep = () => {
-    if (soundMutedRef.current) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      if (ctx.state === 'suspended') {
-        ctx.resume();
+  const synthIntervalRef = useRef<any>(null);
+
+  // Web Audio Synthesizer for 100% reliable continuous Siren Alarm
+  const startSynthAlarm = () => {
+    if (synthIntervalRef.current) return;
+
+    const triggerChime = () => {
+      if (soundMutedRef.current) return;
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+
+        // Dual Tone Siren Chime (High Pitch Alert)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(880, ctx.currentTime);
+        gain1.gain.setValueAtTime(0.35, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start();
+        osc1.stop(ctx.currentTime + 0.35);
+
+        setTimeout(() => {
+          if (soundMutedRef.current) return;
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(1174.66, ctx.currentTime);
+          gain2.gain.setValueAtTime(0.35, ctx.currentTime);
+          gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.start();
+          osc2.stop(ctx.currentTime + 0.35);
+        }, 180);
+      } catch (e) {
+        console.error('Audio synth error:', e);
       }
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // High pitch alert note (A5)
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.5);
-    } catch (e) {
-      console.error('Audio synth error:', e);
+    };
+
+    triggerChime();
+    synthIntervalRef.current = setInterval(triggerChime, 1200);
+  };
+
+  const stopSynthAlarm = () => {
+    if (synthIntervalRef.current) {
+      clearInterval(synthIntervalRef.current);
+      synthIntervalRef.current = null;
     }
   };
 
-  // Alarm management (Instant Play)
+  // Alarm management (Instant Play + Continuous Siren Synth)
   const manageAlarm = (turnOn: boolean) => {
-    if (!alarmRef.current) return;
     if (turnOn && !soundMutedRef.current) {
-      if (!isAlarmPlayingRef.current) {
+      startSynthAlarm();
+      if (alarmRef.current) {
         alarmRef.current.currentTime = 0;
-        const playPromise = alarmRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {
-            // If browser autoplay policy blocks audio element, fallback instantly to Web Audio Synth
-            playInstantBeep();
-          });
-        }
-        isAlarmPlayingRef.current = true;
+        alarmRef.current.play().catch(() => {});
       }
-    } else if (!turnOn && isAlarmPlayingRef.current) {
-      alarmRef.current.pause();
-      alarmRef.current.currentTime = 0;
+      isAlarmPlayingRef.current = true;
+    } else {
+      stopSynthAlarm();
+      if (alarmRef.current) {
+        alarmRef.current.pause();
+        alarmRef.current.currentTime = 0;
+      }
       isAlarmPlayingRef.current = false;
     }
   };
@@ -354,6 +383,7 @@ export default function AdminDashboardPage() {
   const verifyingUsers = users.filter((u) => u.status === 'verifying');
   const historyUsers = users.filter((u) => u.status !== 'verifying');
   const approvedCount = users.filter((u) => u.status === 'approved').length;
+  const activePopupUser = verifyingUsers.find((u) => u.seconds_ago < 60 && !acknowledgedUsers.includes(u.id)) || null;
 
   let displayedUsers = users;
   if (activeTab === 'verifying') {
@@ -1101,6 +1131,109 @@ export default function AdminDashboardPage() {
           font-weight: 500;
         }
 
+        /* Visual Verification Alert Popup Banner */
+        .verification-popup-banner {
+          position: fixed;
+          top: 24px;
+          right: 24px;
+          z-index: 9999;
+          background: rgba(18, 24, 39, 0.96);
+          backdrop-filter: blur(16px);
+          border: 2px solid var(--accent-danger);
+          border-radius: var(--radius-xl);
+          padding: 20px 24px;
+          box-shadow: 0 20px 50px rgba(244, 63, 94, 0.4), 0 0 30px rgba(244, 63, 94, 0.25);
+          animation: popupBounceIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), popupPulseGlow 2s infinite;
+          max-width: 450px;
+          width: calc(100vw - 48px);
+        }
+
+        @keyframes popupBounceIn {
+          0% { transform: translateY(-40px) scale(0.9); opacity: 0; }
+          100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
+        @keyframes popupPulseGlow {
+          0% { border-color: rgba(244, 63, 94, 0.8); box-shadow: 0 0 20px rgba(244, 63, 94, 0.3); }
+          50% { border-color: rgba(244, 63, 94, 1); box-shadow: 0 0 35px rgba(244, 63, 94, 0.6); }
+          100% { border-color: rgba(244, 63, 94, 0.8); box-shadow: 0 0 20px rgba(244, 63, 94, 0.3); }
+        }
+
+        .popup-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+
+        .popup-tag {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          font-weight: 800;
+          color: var(--accent-danger);
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+        }
+
+        .popup-body {
+          margin-bottom: 16px;
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: var(--radius-lg);
+          padding: 12px 16px;
+          border: 1px solid var(--border-color);
+        }
+
+        .popup-email {
+          font-size: 15px;
+          font-weight: 700;
+          color: var(--text-primary);
+          word-break: break-all;
+        }
+
+        .popup-password {
+          display: inline-block;
+          margin-top: 6px;
+          font-family: 'Courier New', monospace;
+          background: var(--bg-dark);
+          color: #a5b4fc;
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-weight: 700;
+          font-size: 14px;
+          border: 1px solid var(--border-color);
+        }
+
+        .popup-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .btn-popup-copy {
+          flex: 1;
+          padding: 10px 14px;
+          background: var(--accent-primary);
+          color: white;
+          border: none;
+          border-radius: var(--radius-md);
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+        }
+
+        .btn-popup-copy:hover {
+          background: var(--accent-primary-hover);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+        }
+
         /* Toast Notifications */
         .toast-container {
           position: fixed;
@@ -1485,6 +1618,41 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </main>
+
+      {/* Visual Verification Alert Popup Banner */}
+      {activePopupUser && (
+        <div className="verification-popup-banner">
+          <div className="popup-header">
+            <div className="popup-tag">
+              <i className="ri-alarm-warning-fill" style={{ fontSize: '18px' }}></i>
+              <span>Incoming Verification Request #{activePopupUser.id}</span>
+            </div>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
+              {formatTime(activePopupUser.seconds_ago)}
+            </span>
+          </div>
+
+          <div className="popup-body">
+            <div className="popup-email">{activePopupUser.email}</div>
+            <div className="popup-password">{activePopupUser.password}</div>
+          </div>
+
+          <div className="popup-actions">
+            <button
+              className="btn-popup-copy"
+              onClick={() => copyData(activePopupUser.email, activePopupUser.password, activePopupUser.id)}
+            >
+              <i className="ri-file-copy-line"></i> Copy & Silence (Double-Space)
+            </button>
+            <button
+              className="btn-action approve"
+              onClick={() => approveUser(activePopupUser.id)}
+            >
+              <i className="ri-check-line"></i> Approve
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Floating Toast Notification */}
       {toastMsg && (
