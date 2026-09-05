@@ -34,7 +34,7 @@ const globalMemoryStore = globalThis as unknown as {
 if (!globalMemoryStore.users) {
   globalMemoryStore.users = [];
   globalMemoryStore.userAutoId = 1;
-  globalMemoryStore.tapCodes = [{ id: 1, code: '22', created_at: new Date() }];
+  globalMemoryStore.tapCodes = [{ id: 1, code: '99', created_at: new Date() }];
   globalMemoryStore.tapAutoId = 2;
   globalMemoryStore.admins = [
     {
