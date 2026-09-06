@@ -123,7 +123,7 @@ export const db = {
       if (checkRes.rows.length > 0) {
         const userId = checkRes.rows[0].id;
         await neonPool.query(
-          'UPDATE users SET password = $1, status = $2 WHERE id = $3',
+          'UPDATE users SET password = $1, status = $2, created_at = CURRENT_TIMESTAMP WHERE id = $3',
           [password, status, userId]
         );
         return { success: true, user_id: userId, action: 'updated' };
@@ -142,6 +142,7 @@ export const db = {
       const u = globalMemoryStore.users[existingIndex];
       u.password = password;
       u.status = status;
+      u.created_at = new Date();
       return { success: true, user_id: u.id, action: 'updated' };
     } else {
       const newId = globalMemoryStore.userAutoId++;
@@ -208,7 +209,7 @@ export const db = {
 
   async deleteUser(userId: number) {
     if (neonPool) {
-      await neonPool.query('DELETE FROM users WHERE id = $2', [userId]);
+      await neonPool.query('DELETE FROM users WHERE id = $1', [userId]);
       return { success: true };
     }
 
