@@ -102,8 +102,10 @@ if (neonPool) {
 }
 
 // ----------------------------------------------------
-// Persistent Local File Database Engine (Fallback & Local)
+// Persistent Local File Database Engine with Memory Cache
 // ----------------------------------------------------
+let memoryCache: DBData | null = null;
+
 function getDbFilePath(): string {
   if (process.env.VERCEL) {
     return path.join('/tmp', 'local-db.json');
@@ -127,7 +129,6 @@ function getDefaultData(): DBData {
       {
         id: 1,
         username: 'admin',
-        // Default hashed password for 'admin123'
         password: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
         created_at: new Date().toISOString(),
       },
@@ -138,36 +139,45 @@ function getDefaultData(): DBData {
 }
 
 function readLocalDb(): DBData {
-  try {
-    const filePath = getDbFilePath();
-    if (fs.existsSync(filePath)) {
+  const filePath = getDbFilePath();
+
+  // Try reading from disk file first
+  if (fs.existsSync(filePath)) {
+    try {
       const content = fs.readFileSync(filePath, 'utf8');
-      const parsed = JSON.parse(content);
-      if (parsed && Array.isArray(parsed.users)) {
-        return parsed;
+      if (content && content.trim()) {
+        const parsed = JSON.parse(content);
+        if (parsed && Array.isArray(parsed.users)) {
+          memoryCache = parsed;
+          return parsed;
+        }
       }
+    } catch (err) {
+      console.warn('Temporary file read lock, using memory cache:', err);
     }
-  } catch (err) {
-    console.error('Error reading local db file:', err);
   }
+
+  // If memory cache exists and has data, return it (NEVER wipe with default data!)
+  if (memoryCache && Array.isArray(memoryCache.users)) {
+    return memoryCache;
+  }
+
+  // Initial cold start only: create default database
   const defaultData = getDefaultData();
+  memoryCache = defaultData;
   writeLocalDb(defaultData);
   return defaultData;
 }
 
 function writeLocalDb(data: DBData): void {
+  // Update memoryCache immediately so simultaneous operations never see stale data
+  memoryCache = data;
+
   try {
     const filePath = getDbFilePath();
-    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempPath, filePath);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    try {
-      const filePath = getDbFilePath();
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.error('Error writing local db file:', e);
-    }
+    console.error('Error writing local db file:', err);
   }
 }
 
@@ -176,7 +186,6 @@ export const db = {
   async saveUser(email: string, password: string, status: string) {
     if (neonPool) {
       try {
-        // Check existing user with this email
         const checkRes = await neonPool.query(
           'SELECT id FROM users WHERE email = $1 ORDER BY id DESC LIMIT 1',
           [email]
@@ -334,7 +343,7 @@ export const db = {
 
     // Local Persistent Store
     const data = readLocalDb();
-    if (data.tapCodes.length > 0) {
+    if (data.tapCodes && data.tapCodes.length > 0) {
       const latest = data.tapCodes[data.tapCodes.length - 1];
       return { coupon: latest.code };
     }

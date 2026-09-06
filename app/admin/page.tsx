@@ -207,6 +207,12 @@ export default function AdminDashboardPage() {
       if (!Array.isArray(data)) {
         return;
       }
+
+      // Safeguard: Never allow an unexpected empty response to wipe an already populated dashboard
+      if (data.length === 0 && usersRef.current.length > 0) {
+        return;
+      }
+
       setUsers(data);
 
       let shouldRing = false;
@@ -453,7 +459,7 @@ export default function AdminDashboardPage() {
 
     // 1-second ultra-fast polling for immediate detection of incoming users
     const userInterval = setInterval(loadUsers, 1000);
-    const couponInterval = setInterval(loadCoupon, 4000);
+    const couponInterval = setInterval(loadCoupon, 10000);
 
     const handleFirstInteraction = () => {
       unlockSound();
