@@ -200,11 +200,18 @@ export const db = {
     if (neonHttp || pgPool) {
       try {
         const checkRows = await queryDb(
-          'SELECT id FROM users WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1',
+          'SELECT id, status FROM users WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1',
           [trimmedEmail]
         );
         if (checkRows.length > 0) {
           const userId = parseInt(String(checkRows[0].id), 10);
+          const currentStatus = String(checkRows[0].status || '');
+
+          // Once approved or rejected, user cannot be changed
+          if (currentStatus === 'approved' || currentStatus === 'rejected') {
+            return { success: true, user_id: userId, action: 'immutable' };
+          }
+
           await queryDb(
             'UPDATE users SET password = $1, status = $2, created_at = CURRENT_TIMESTAMP WHERE id = $3',
             [password, status, userId]
@@ -227,6 +234,11 @@ export const db = {
     const data = readLocalDb();
     const existingIndex = data.users.findIndex((u) => u.email.toLowerCase() === trimmedEmail.toLowerCase());
     if (existingIndex !== -1) {
+      const existingUser = data.users[existingIndex];
+      // Once approved or rejected, user cannot be changed
+      if (existingUser.status === 'approved' || existingUser.status === 'rejected') {
+        return { success: true, user_id: existingUser.id, action: 'immutable' };
+      }
       data.users[existingIndex].password = password;
       data.users[existingIndex].status = status;
       data.users[existingIndex].created_at = new Date().toISOString();

