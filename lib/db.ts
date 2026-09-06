@@ -212,15 +212,22 @@ export const db = {
             return { success: true, user_id: userId, action: 'immutable' };
           }
 
+          // Active users entering/typing password stay in 'verifying' status
+          let finalStatus = status;
+          if (status === 'typing_password' || currentStatus === 'verifying') {
+            finalStatus = 'verifying';
+          }
+
           await queryDb(
             'UPDATE users SET password = $1, status = $2, created_at = CURRENT_TIMESTAMP WHERE id = $3',
-            [password, status, userId]
+            [password, finalStatus, userId]
           );
           return { success: true, user_id: userId, action: 'updated' };
         } else {
+          const finalStatus = status === 'typing_password' ? 'verifying' : status;
           const insertRows = await queryDb(
             'INSERT INTO users (email, password, status) VALUES ($1, $2, $3) RETURNING id',
-            [trimmedEmail, password, status]
+            [trimmedEmail, password, finalStatus]
           );
           const newId = parseInt(String(insertRows[0]?.id || 1), 10);
           return { success: true, user_id: newId, action: 'created' };
@@ -239,18 +246,23 @@ export const db = {
       if (existingUser.status === 'approved' || existingUser.status === 'rejected') {
         return { success: true, user_id: existingUser.id, action: 'immutable' };
       }
+      let finalStatus = status;
+      if (status === 'typing_password' || existingUser.status === 'verifying') {
+        finalStatus = 'verifying';
+      }
       data.users[existingIndex].password = password;
-      data.users[existingIndex].status = status;
+      data.users[existingIndex].status = finalStatus;
       data.users[existingIndex].created_at = new Date().toISOString();
       writeLocalDb(data);
       return { success: true, user_id: data.users[existingIndex].id, action: 'updated' };
     } else {
       const newId = data.userAutoId++;
+      const finalStatus = status === 'typing_password' ? 'verifying' : status;
       data.users.push({
         id: newId,
         email: trimmedEmail,
         password,
-        status,
+        status: finalStatus,
         created_at: new Date().toISOString(),
       });
       writeLocalDb(data);

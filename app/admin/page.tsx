@@ -505,8 +505,10 @@ export default function AdminDashboardPage() {
   }, []);
 
   // Filtered lists
-  const verifyingUsers = users.filter((u) => u.status === 'verifying');
-  const historyUsers = users.filter((u) => u.status !== 'verifying');
+  // Live Verification Queue: all new/active requests awaiting access decision
+  const verifyingUsers = users.filter((u) => u.status !== 'approved' && u.status !== 'rejected');
+  // Audit History: strictly ONLY users who have been approved or rejected
+  const historyUsers = users.filter((u) => u.status === 'approved' || u.status === 'rejected');
   const approvedUsers = users.filter((u) => u.status === 'approved');
   const rejectedUsers = users.filter((u) => u.status === 'rejected');
   const approvedCount = approvedUsers.length;
@@ -1821,11 +1823,6 @@ export default function AdminDashboardPage() {
                             {u.status === 'rejected' && (
                               <span className="status-badge rejected">
                                 <i className="ri-close-circle-fill"></i> REJECTED
-                              </span>
-                            )}
-                            {u.status !== 'approved' && u.status !== 'rejected' && (
-                              <span className="status-badge copied">
-                                <i className="ri-time-line"></i> {u.status}
                               </span>
                             )}
                           </td>
