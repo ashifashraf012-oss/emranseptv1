@@ -29,6 +29,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# local database storage
+/data/
+
 # OS files
 .DS_Store
 Thumbs.db

